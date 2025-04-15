@@ -37,3 +37,49 @@ async def check_http_https(domain: str) -> dict:
             }
 
     return results
+
+
+import ssl
+import socket
+from datetime import datetime
+
+def check_ssl(domain: str) -> dict:
+    """
+    Проверяет SSL-сертификат домена:
+    - срок действия
+    - дату окончания
+    - издателя
+
+    Возвращает:
+    {
+        "valid": True/False,
+        "expires_at": "2025-06-01",
+        "days_left": 47,
+        "issuer": "Let's Encrypt"
+    }
+    """
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((domain, 443), timeout=5) as sock:
+            with context.wrap_socket(sock, server_hostname=domain) as ssock:
+                cert = ssock.getpeercert()
+
+        expires_str = cert['notAfter']
+        expires_at = datetime.strptime(expires_str, '%b %d %H:%M:%S %Y %Z')
+        days_left = (expires_at - datetime.utcnow()).days
+
+        issuer_parts = [x[0][1] for x in cert.get("issuer", [])]
+        issuer = ", ".join(issuer_parts)
+
+        return {
+            "valid": True,
+            "expires_at": expires_at.strftime("%Y-%m-%d"),
+            "days_left": days_left,
+            "issuer": issuer
+        }
+
+    except Exception as e:
+        return {
+            "valid": False,
+            "error": str(e)
+        }

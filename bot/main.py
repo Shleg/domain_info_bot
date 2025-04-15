@@ -10,6 +10,7 @@ from db.models import Domain
 from db.db import SessionLocal
 from bot.utils import is_valid_domain
 from bot.utils import check_http_https
+from bot.utils import check_ssl
 
 from config import ALLOWED_USER_IDS
 
@@ -118,6 +119,17 @@ async def check_domain_handler(message: Message):
             reply += f"• <b>{proto.upper()}</b>: ✅ {res['code']}\n"
         else:
             reply += f"• <b>{proto.upper()}</b>: ❌ {res['error']}\n"
+
+    ssl_result = check_ssl(domain)
+    reply += "\n🔐 <b>SSL-сертификат:</b>\n"
+    if ssl_result["valid"]:
+        reply += (
+            f"• Издатель: {ssl_result['issuer']}\n"
+            f"• Действует до: {ssl_result['expires_at']}\n"
+            f"• Осталось дней: {ssl_result['days_left']}\n"
+        )
+    else:
+        reply += f"• ❌ Ошибка проверки SSL: {ssl_result['error']}\n"
 
     await message.answer(reply)
 
