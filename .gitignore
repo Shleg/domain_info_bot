@@ -1,0 +1,168 @@
+# --- 📝 Логи и временные файлы ---
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+out.log
+error.log
+debug.log
+
+# --- 🖥️ Операционные системы ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+System Volume Information/
+
+# Linux
+*.pid
+*.swp
+*.swo
+*.swn
+*~
+
+# --- 📁 Файлы IDE ---
+# VSCode
+.vscode/
+.vscode/**/*
+!.vscode/extensions.json  # Оставляем список расширений
+!.vscode/settings.json    # Если нужно сохранять настройки
+
+# JetBrains (PyCharm, WebStorm, IntelliJ IDEA, etc.)
+.idea/
+.idea/**/*
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.project
+.classpath
+.settings/
+.metadata/
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# --- 📦 Node.js и фронтенд (npm, yarn, vite) ---
+node_modules/
+dist/
+build/
+.cache/
+.npm/
+.nvm/
+.bower_components/
+coverage/
+.tmp/
+*.tsbuildinfo
+yarn.lock
+pnpm-lock.yaml
+
+# --- 🐍 Python ---
+# Виртуальное окружение
+venv/
+.env/
+.env.local
+Pipfile
+Pipfile.lock
+poetry.lock
+
+# Кеши
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Django & Flask
+*.sqlite3
+db.sqlite3
+instance/
+media/
+static/
+migrations/
+
+# --- 🐳 Docker ---
+docker-compose.override.yml
+docker-compose.override.yaml
+.dockerignore
+Dockerfile
+Dockerfile.*
+*.dockerfile
+*docker-compose*.yml
+*docker-compose*.yaml
+
+# --- 🛢️ Базы данных и кеш ---
+*.sql
+*.sqlite
+*.db
+*.db-journal
+*.tar
+*.gz
+*.zip
+*.dump
+*.rdb
+redis_data/
+postgres/
+mysql/
+mongo/
+
+# --- 🔧 CI/CD и конфигурационные файлы ---
+.circleci/
+.github/
+.gitlab-ci.yml
+*.code-workspace
+*.tfstate
+terraform.tfstate*
+*.tfvars
+terraform.tfvars
+.idea_modules/
+
+# --- 🔑 Секретные файлы и ключи ---
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.cer
+*.env
+.env.*
+secrets.yaml
+secrets.json
+config.json
+auth.json
+
+# --- 💾 Кеш и временные файлы ---
+*.swp
+*.swo
+*.bak
+*.old
+*.tmp
+*.cache
+*.log.*
+*.log.?
+
+# --- 🎨 Дизайн и медиа ---
+*.psd
+*.ai
+*.sketch
+*.xd
+*.fig
+*.xcf
+*.tiff
+*.bmp
+
+# --- 📡 API и HTTP-запросы ---
+.http
+.rest
