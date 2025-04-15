@@ -1,5 +1,5 @@
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram.types import Message, BotCommand
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 import asyncio
@@ -31,6 +31,25 @@ async def cmd_start(message: Message):
         return
 
     await message.answer("👋 Привет! Я слежу за сайтами. Отправь мне домен, чтобы добавить его в отслеживание.")
+
+
+@dp.message(F.text == "/help")
+async def cmd_help(message: Message):
+    if not is_authorized(message.from_user.id):
+        await message.answer("⛔️ У вас нет доступа к этой команде.")
+        return
+
+    text = (
+        "🤖 <b>Команды бота:</b>\n\n"
+        "<b>/add example.com</b> — добавить домен для отслеживания\n"
+        "<b>/remove example.com</b> — удалить домен из отслеживания\n"
+        "<b>/list</b> — показать все домены в отслеживании\n"
+        "<b>/check example.com</b> — вручную проверить домен\n"
+        "<b>/help</b> — показать справку по командам"
+    )
+    await message.answer(text)
+
+
 
 
 @dp.message(F.text.startswith("/add"))
@@ -174,8 +193,13 @@ async def remove_domain_handler(message: Message):
         await message.answer(f"🗑️ Домен <b>{domain}</b> удалён из отслеживания.")
 
 async def main():
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Запустить бота"),
+        BotCommand(command="list", description="Список всех доменов"),
+        BotCommand(command="help", description="Справка по командам"),
+    ])
     await init_db()
-    scheduler.add_job(check_all_domains, "interval", minutes=1)
+    scheduler.add_job(check_all_domains, "interval", minutes=5)
     scheduler.start()
     await dp.start_polling(bot)
 
