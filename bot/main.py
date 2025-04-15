@@ -9,6 +9,7 @@ from db.db import init_db
 from db.models import Domain
 from db.db import SessionLocal
 from bot.utils import is_valid_domain, check_http_https, check_ssl, check_domain_expiry
+from bot.scheduler import scheduler, check_all_domains
 
 from config import ALLOWED_USER_IDS
 
@@ -142,8 +143,40 @@ async def check_domain_handler(message: Message):
     await message.answer(reply)
 
 
+@dp.message(F.text.startswith("/remove"))
+async def remove_domain_handler(message: Message):
+    if not is_authorized(message.from_user.id):
+        await message.answer("⛔️ У вас нет доступа к этой команде.")
+        return
+
+    parts = message.text.strip().split()
+    if len(parts) != 2:
+        await message.answer("⚠️ Используй команду так: <code>/remove example.com</code>")
+        return
+
+    domain = parts[1].strip().lower()
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            Domain.__table__.select().where(Domain.name == domain)
+        )
+        row = result.fetchone()
+
+        if not row:
+            await message.answer("ℹ️ Такой домен не найден в базе.")
+            return
+
+        await session.execute(
+            Domain.__table__.delete().where(Domain.name == domain)
+        )
+        await session.commit()
+
+        await message.answer(f"🗑️ Домен <b>{domain}</b> удалён из отслеживания.")
+
 async def main():
     await init_db()
+    scheduler.add_job(check_all_domains, "interval", minutes=1)
+    scheduler.start()
     await dp.start_polling(bot)
 
 
