@@ -9,6 +9,7 @@ from db.db import init_db
 from db.models import Domain
 from db.db import SessionLocal
 from bot.utils import is_valid_domain
+from bot.utils import check_http_https
 
 from config import ALLOWED_USER_IDS
 
@@ -92,6 +93,33 @@ async def list_domains_handler(message: Message):
             text += f"• {row.name}\n"
 
         await message.answer(text)
+
+
+@dp.message(F.text.startswith("/check"))
+async def check_domain_handler(message: Message):
+    if not is_authorized(message.from_user.id):
+        await message.answer("⛔️ У вас нет доступа к этой команде.")
+        return
+
+    parts = message.text.strip().split()
+    if len(parts) != 2:
+        await message.answer("⚠️ Используй команду так: <code>/check example.com</code>")
+        return
+
+    domain = parts[1].strip().lower()
+    await message.answer(f"🔍 Проверяю <b>{domain}</b>...")
+
+    results = await check_http_https(domain)
+
+    reply = f"📊 Результаты проверки <b>{domain}</b>:\n"
+    for proto in ["http", "https"]:
+        res = results.get(proto)
+        if res["status"] == "ok":
+            reply += f"• <b>{proto.upper()}</b>: ✅ {res['code']}\n"
+        else:
+            reply += f"• <b>{proto.upper()}</b>: ❌ {res['error']}\n"
+
+    await message.answer(reply)
 
 
 async def main():
