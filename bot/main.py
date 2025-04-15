@@ -8,9 +8,7 @@ from config import BOT_TOKEN
 from db.db import init_db
 from db.models import Domain
 from db.db import SessionLocal
-from bot.utils import is_valid_domain
-from bot.utils import check_http_https
-from bot.utils import check_ssl
+from bot.utils import is_valid_domain, check_http_https, check_ssl, check_domain_expiry
 
 from config import ALLOWED_USER_IDS
 
@@ -130,6 +128,16 @@ async def check_domain_handler(message: Message):
         )
     else:
         reply += f"• ❌ Ошибка проверки SSL: {ssl_result['error']}\n"
+
+    whois_result = check_domain_expiry(domain)
+    reply += "\n🌐 <b>Регистрация домена:</b>\n"
+    if whois_result["valid"]:
+        reply += (
+            f"• Истекает: {whois_result['expires_at']}\n"
+            f"• Осталось дней: {whois_result['days_left']}\n"
+        )
+    else:
+        reply += f"• ❌ Ошибка WHOIS: {whois_result['error']}\n"
 
     await message.answer(reply)
 

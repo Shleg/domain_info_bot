@@ -1,5 +1,7 @@
 import re
 import httpx
+import whois
+from datetime import datetime
 
 def is_valid_domain(domain: str) -> bool:
     """
@@ -76,6 +78,47 @@ def check_ssl(domain: str) -> dict:
             "expires_at": expires_at.strftime("%Y-%m-%d"),
             "days_left": days_left,
             "issuer": issuer
+        }
+
+    except Exception as e:
+        return {
+            "valid": False,
+            "error": str(e)
+        }
+
+
+def check_domain_expiry(domain: str) -> dict:
+    """
+    Проверяет дату окончания регистрации домена.
+    Возвращает:
+    {
+        "valid": True,
+        "expires_at": "2025-08-19",
+        "days_left": 103
+    }
+    или
+    {
+        "valid": False,
+        "error": "..."
+    }
+    """
+    try:
+        w = whois.whois(domain)
+        expires_at = w.expiration_date
+
+        # expiration_date может быть list или datetime
+        if isinstance(expires_at, list):
+            expires_at = expires_at[0]
+
+        if not isinstance(expires_at, datetime):
+            raise ValueError("Не удалось определить дату окончания.")
+
+        days_left = (expires_at - datetime.utcnow()).days
+
+        return {
+            "valid": True,
+            "expires_at": expires_at.strftime("%Y-%m-%d"),
+            "days_left": days_left
         }
 
     except Exception as e:
