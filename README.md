@@ -64,6 +64,13 @@ cd DomainInfoBot
 cp .env.example .env
 ```
 
+Edit the `.env` file and set the following variables:
+
+- `BOT_TOKEN`: Your Telegram bot token from [BotFather](https://t.me/BotFather)
+- `ALLOWED_USER_IDS`: Comma-separated list of Telegram user IDs allowed to use the bot
+
+To find your Telegram user ID, you can use the bot [@userinfobot](https://t.me/userinfobot)
+
 3. **Run the bot using Docker Compose:**
 
 ```bash
