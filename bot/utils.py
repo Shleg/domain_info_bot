@@ -6,7 +6,7 @@ Includes:
 - SSL certificate expiration checks
 - Domain registration expiration checks
 """
-
+import subprocess
 import re
 import httpx
 import whois
@@ -112,46 +112,93 @@ def check_ssl(domain: str) -> Dict[str, Any]:
         }
 
 
+# def check_domain_expiry(domain: str) -> Dict[str, Any]:
+#     """
+#     Checks the domain registration expiration date via WHOIS.
+#
+#     Args:
+#         domain (str): The domain name.
+#
+#     Returns:
+#         dict: Expiry info or error:
+#               {
+#                   "valid": True,
+#                   "expires_at": "2025-08-19",
+#                   "days_left": 103
+#               }
+#               or
+#               {
+#                   "valid": False,
+#                   "error": "..."
+#               }
+#     """
+#     try:
+#         w = whois.whois(domain)
+#         expires_at = w.expiration_date
+#
+#         if isinstance(expires_at, list):
+#             expires_at = next((d for d in expires_at if isinstance(d, datetime)), None)
+#
+#         if not isinstance(expires_at, datetime):
+#             raise ValueError("Could not determine expiration date.")
+#
+#         days_left = (expires_at - datetime.utcnow()).days
+#
+#         return {
+#             "valid": True,
+#             "expires_at": expires_at.strftime("%Y-%m-%d"),
+#             "days_left": days_left
+#         }
+#
+#     except Exception as e:
+#         return {
+#             "valid": False,
+#             "error": str(e)
+#         }
+
+
 def check_domain_expiry(domain: str) -> Dict[str, Any]:
     """
-    Checks the domain registration expiration date via WHOIS.
-
-    Args:
-        domain (str): The domain name.
-
-    Returns:
-        dict: Expiry info or error:
-              {
-                  "valid": True,
-                  "expires_at": "2025-08-19",
-                  "days_left": 103
-              }
-              or
-              {
-                  "valid": False,
-                  "error": "..."
-              }
+    Checks domain expiry using the system `whois` command for better TLD support.
     """
     try:
-        w = whois.whois(domain)
-        expires_at = w.expiration_date
+        result = subprocess.run(["whois", domain], capture_output=True, text=True, timeout=10)
 
-        if isinstance(expires_at, list):
-            expires_at = expires_at[0]
+        if result.returncode != 0:
+            raise RuntimeError("WHOIS command failed")
 
-        if not isinstance(expires_at, datetime):
-            raise ValueError("Could not determine expiration date.")
+        output = result.stdout
 
-        days_left = (expires_at - datetime.utcnow()).days
+        # Try multiple patterns for expiration date
+        patterns = [
+            r"Expiry Date:\s?(.+)",
+            r"Expiration Date:\s?(.+)",
+            r"Registry Expiry Date:\s?(.+)",
+            r"paid-till:\s?(.+)"
+        ]
 
-        return {
-            "valid": True,
-            "expires_at": expires_at.strftime("%Y-%m-%d"),
-            "days_left": days_left
-        }
+        for pattern in patterns:
+            match = re.search(pattern, output)
+            if match:
+                date_str = match.group(1).strip()
+
+                # Try parsing multiple formats
+                for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%Y.%m.%d", "%Y-%m-%dT%H:%M:%SZ"):
+                    try:
+                        expires_at = datetime.strptime(date_str, fmt)
+                        days_left = (expires_at - datetime.utcnow()).days
+                        return {
+                            "valid": True,
+                            "expires_at": expires_at.strftime("%Y-%m-%d"),
+                            "days_left": days_left
+                        }
+                    except ValueError:
+                        continue
+
+        raise ValueError("Could not parse expiration date.")
 
     except Exception as e:
         return {
             "valid": False,
-            "error": str(e)
+            "error": f"WHOIS error: {str(e)}"
         }
