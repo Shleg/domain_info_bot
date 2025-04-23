@@ -287,6 +287,24 @@ async def remove_domain_handler(message: Message):
         await message.answer(f"🗑️ Domain <b>{domain}</b> has been removed from monitoring.")
 
 
+@dp.message(F.text == "/donate")
+async def cmd_donate(message: Message):
+    """
+    Handler for the /donate command.
+    Sends a message with a PayPal donation link.
+    """
+    if not is_authorized(message.from_user.id):
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💖 Donate via PayPal", url="https://www.paypal.com/donate/?hosted_button_id=7LZ3SYG7H69JY")]
+    ])
+
+    await message.answer(
+        "🙏 If you'd like to support this project, you can make a donation via PayPal.\n\n"
+        "Every contribution helps keep the bot alive and improving. Thank you! 💙",
+        reply_markup=keyboard
+    )
 
 @dp.message()
 async def fallback_handler(message: Message):
@@ -306,7 +324,8 @@ async def fallback_handler(message: Message):
         "<b>/remove example.com</b> — remove a domain from monitoring\n"
         "<b>/list</b> — show all monitored domains\n"
         "<b>/check example.com</b> — manually check a domain\n"
-        "<b>/help</b> — show this help message"
+        "<b>/help</b> — show this help message\n"
+        "<b>/donate </b> — support the project via PayPal"
     )
     await message.answer(text)
 
@@ -319,7 +338,8 @@ async def main():
     await bot.set_my_commands([
         BotCommand(command="start", description="Start the bot"),
         BotCommand(command="list", description="List all domains"),
-        BotCommand(command="help", description="Help with commands"),
+        BotCommand(command="help", description="Support the roject via PayPal"),
+        BotCommand(command="donate", description="Help with commands"),
     ])
     await init_db()
     scheduler.add_job(check_all_domains, "interval", minutes=5)
