@@ -253,6 +253,31 @@ async def remove_domain_handler(message: Message):
 
         await message.answer(f"🗑️ Domain <b>{domain}</b> has been removed from monitoring.")
 
+
+
+@dp.message()
+async def fallback_handler(message: Message):
+    """
+    Fallback handler for any unrecognized input.
+    Sends help instructions to the authorized user.
+
+    Args:
+        message (Message): Telegram message object.
+    """
+    if not is_authorized(message.from_user.id):
+        return
+
+    text = (
+        "🤖 <b>Available commands:</b>\n\n"
+        "<b>/add example.com</b> — add a domain for monitoring\n"
+        "<b>/remove example.com</b> — remove a domain from monitoring\n"
+        "<b>/list</b> — show all monitored domains\n"
+        "<b>/check example.com</b> — manually check a domain\n"
+        "<b>/help</b> — show this help message"
+    )
+    await message.answer(text)
+
+
 async def main():
     """
     Main entry point of the bot.
