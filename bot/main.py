@@ -14,6 +14,15 @@ from bot.scheduler import scheduler, check_all_domains
 from config import ALLOWED_USER_IDS
 
 def is_authorized(user_id: int) -> bool:
+    """
+    Check if the user ID is authorized to interact with the bot.
+
+    Args:
+        user_id (int): Telegram user ID.
+
+    Returns:
+        bool: True if authorized, False otherwise.
+    """
     return user_id in ALLOWED_USER_IDS
 
 bot = Bot(
@@ -23,29 +32,43 @@ bot = Bot(
 dp = Dispatcher()
 
 
-# Хэндлер команды /start
+# Handler for the /start command
 @dp.message(F.text == "/start")
 async def cmd_start(message: Message):
+    """
+    Handler for the /start command.
+    Sends a greeting message to the authorized user.
+
+    Args:
+        message (Message): Telegram message object.
+    """
     if not is_authorized(message.from_user.id):
-        await message.answer("⛔️ У вас нет доступа к этой команде.")
+        await message.answer("⛔️ You do not have access to this command.")
         return
 
-    await message.answer("👋 Привет! Я слежу за сайтами. Отправь мне домен, чтобы добавить его в отслеживание.")
+    await message.answer("👋 Hi! I'm monitoring websites. Send me a domain to start monitoring it.")
 
 
 @dp.message(F.text == "/help")
 async def cmd_help(message: Message):
+    """
+    Handler for the /help command.
+    Sends a help message with available commands to the authorized user.
+
+    Args:
+        message (Message): Telegram message object.
+    """
     if not is_authorized(message.from_user.id):
-        await message.answer("⛔️ У вас нет доступа к этой команде.")
+        await message.answer("⛔️ You do not have access to this command.")
         return
 
     text = (
-        "🤖 <b>Команды бота:</b>\n\n"
-        "<b>/add example.com</b> — добавить домен для отслеживания\n"
-        "<b>/remove example.com</b> — удалить домен из отслеживания\n"
-        "<b>/list</b> — показать все домены в отслеживании\n"
-        "<b>/check example.com</b> — вручную проверить домен\n"
-        "<b>/help</b> — показать справку по командам"
+        "🤖 <b>Bot commands:</b>\n\n"
+        "<b>/add example.com</b> — add a domain for monitoring\n"
+        "<b>/remove example.com</b> — remove a domain from monitoring\n"
+        "<b>/list</b> — show all monitored domains\n"
+        "<b>/check example.com</b> — manually check a domain\n"
+        "<b>/help</b> — show this help message"
     )
     await message.answer(text)
 
@@ -54,34 +77,44 @@ async def cmd_help(message: Message):
 
 @dp.message(F.text.startswith("/add"))
 async def add_domain_handler(message: Message):
+    """
+    Handler for the /add command.
+    Adds a domain to the monitoring list for the authorized user.
+
+    Args:
+        message (Message): Telegram message object.
+    """
     if not is_authorized(message.from_user.id):
-        await message.answer("⛔️ У вас нет доступа к этой команде.")
+        await message.answer("⛔️ You do not have access to this command.")
         return
 
     parts = message.text.strip().split()
 
     if len(parts) != 2:
-        await message.answer("⚠️ Правильное использование: <code>/add example.com</code>")
+        await message.answer("⚠️ Correct usage: <code>/add example.com</code>")
         return
 
     domain = parts[1].strip().lower()
 
     if not is_valid_domain(domain):
-        await message.answer("❌ Это не похоже на валидное доменное имя.")
+        await message.answer("❌ This does not look like a valid domain name.")
         return
 
     async with SessionLocal() as session:
-        # Проверка, есть ли уже такой домен
+        # Check if the domain is already monitored by this user
         existing = await session.execute(
-            Domain.__table__.select().where(Domain.name == domain)
+            Domain.__table__.select().where(
+                Domain.name == domain,
+                Domain.user_id == message.from_user.id
+            )
         )
         result = existing.fetchone()
 
         if result:
-            await message.answer("ℹ️ Этот домен уже отслеживается.")
+            await message.answer("ℹ️ This domain is already being monitored.")
             return
 
-        # Создаём новый объект
+        # Create a new domain object
         new_domain = Domain(
             name=domain,
             user_id=message.from_user.id
@@ -90,24 +123,33 @@ async def add_domain_handler(message: Message):
         session.add(new_domain)
         await session.commit()
 
-        await message.answer(f"✅ Домен <b>{domain}</b> добавлен в отслеживание.")
+        await message.answer(f"✅ Domain <b>{domain}</b> has been added for monitoring.")
 
 
 @dp.message(F.text == "/list")
 async def list_domains_handler(message: Message):
+    """
+    Handler for the /list command.
+    Lists all domains being monitored by the authorized user.
+
+    Args:
+        message (Message): Telegram message object.
+    """
     async with SessionLocal() as session:
         if not is_authorized(message.from_user.id):
-            await message.answer("⛔️ У вас нет доступа к этой команде.")
+            await message.answer("⛔️ You do not have access to this command.")
             return
 
-        result = await session.execute(Domain.__table__.select())
+        result = await session.execute(
+            Domain.__table__.select().where(Domain.user_id == message.from_user.id)
+        )
         domains = result.fetchall()
 
         if not domains:
-            await message.answer("🔍 В базе пока нет доменов.")
+            await message.answer("🔍 There are no domains in the database yet.")
             return
 
-        text = "📝 Список отслеживаемых доменов:\n"
+        text = "📝 List of monitored domains:\n"
         for row in domains:
             text += f"• {row.name}\n"
 
@@ -116,21 +158,28 @@ async def list_domains_handler(message: Message):
 
 @dp.message(F.text.startswith("/check"))
 async def check_domain_handler(message: Message):
+    """
+    Handler for the /check command.
+    Performs a manual check of the specified domain's HTTP/HTTPS status, SSL certificate, and WHOIS info.
+
+    Args:
+        message (Message): Telegram message object.
+    """
     if not is_authorized(message.from_user.id):
-        await message.answer("⛔️ У вас нет доступа к этой команде.")
+        await message.answer("⛔️ You do not have access to this command.")
         return
 
     parts = message.text.strip().split()
     if len(parts) != 2:
-        await message.answer("⚠️ Используй команду так: <code>/check example.com</code>")
+        await message.answer("⚠️ Use the command like this: <code>/check example.com</code>")
         return
 
     domain = parts[1].strip().lower()
-    await message.answer(f"🔍 Проверяю <b>{domain}</b>...")
+    await message.answer(f"🔍 Checking <b>{domain}</b>...")
 
     results = await check_http_https(domain)
 
-    reply = f"📊 Результаты проверки <b>{domain}</b>:\n"
+    reply = f"📊 Check results for <b>{domain}</b>:\n"
     for proto in ["http", "https"]:
         res = results.get(proto)
         if res["status"] == "ok":
@@ -139,64 +188,80 @@ async def check_domain_handler(message: Message):
             reply += f"• <b>{proto.upper()}</b>: ❌ {res['error']}\n"
 
     ssl_result = check_ssl(domain)
-    reply += "\n🔐 <b>SSL-сертификат:</b>\n"
+    reply += "\n🔐 <b>SSL Certificate:</b>\n"
     if ssl_result["valid"]:
         reply += (
-            f"• Издатель: {ssl_result['issuer']}\n"
-            f"• Действует до: {ssl_result['expires_at']}\n"
-            f"• Осталось дней: {ssl_result['days_left']}\n"
+            f"• Issuer: {ssl_result['issuer']}\n"
+            f"• Valid until: {ssl_result['expires_at']}\n"
+            f"• Days left: {ssl_result['days_left']}\n"
         )
     else:
-        reply += f"• ❌ Ошибка проверки SSL: {ssl_result['error']}\n"
+        reply += f"• ❌ SSL check error: {ssl_result['error']}\n"
 
     whois_result = check_domain_expiry(domain)
-    reply += "\n🌐 <b>Регистрация домена:</b>\n"
+    reply += "\n🌐 <b>Domain Registration:</b>\n"
     if whois_result["valid"]:
         reply += (
-            f"• Истекает: {whois_result['expires_at']}\n"
-            f"• Осталось дней: {whois_result['days_left']}\n"
+            f"• Expires on: {whois_result['expires_at']}\n"
+            f"• Days left: {whois_result['days_left']}\n"
         )
     else:
-        reply += f"• ❌ Ошибка WHOIS: {whois_result['error']}\n"
+        reply += f"• ❌ WHOIS error: {whois_result['error']}\n"
 
     await message.answer(reply)
 
 
 @dp.message(F.text.startswith("/remove"))
 async def remove_domain_handler(message: Message):
+    """
+    Handler for the /remove command.
+    Removes a domain from the monitoring list for the authorized user.
+
+    Args:
+        message (Message): Telegram message object.
+    """
     if not is_authorized(message.from_user.id):
-        await message.answer("⛔️ У вас нет доступа к этой команде.")
+        await message.answer("⛔️ You do not have access to this command.")
         return
 
     parts = message.text.strip().split()
     if len(parts) != 2:
-        await message.answer("⚠️ Используй команду так: <code>/remove example.com</code>")
+        await message.answer("⚠️ Use the command like this: <code>/remove example.com</code>")
         return
 
     domain = parts[1].strip().lower()
 
     async with SessionLocal() as session:
         result = await session.execute(
-            Domain.__table__.select().where(Domain.name == domain)
+            Domain.__table__.select().where(
+                Domain.name == domain,
+                Domain.user_id == message.from_user.id
+            )
         )
-        row = result.fetchone()
 
-        if not row:
-            await message.answer("ℹ️ Такой домен не найден в базе.")
+        if not result.fetchone():
+            await message.answer("ℹ️ This domain was not found in your list.")
             return
 
         await session.execute(
-            Domain.__table__.delete().where(Domain.name == domain)
+            Domain.__table__.delete().where(
+                Domain.name == domain,
+                Domain.user_id == message.from_user.id
+            )
         )
         await session.commit()
 
-        await message.answer(f"🗑️ Домен <b>{domain}</b> удалён из отслеживания.")
+        await message.answer(f"🗑️ Domain <b>{domain}</b> has been removed from monitoring.")
 
 async def main():
+    """
+    Main entry point of the bot.
+    Sets commands, initializes the database, starts the scheduler, and begins polling.
+    """
     await bot.set_my_commands([
-        BotCommand(command="start", description="Запустить бота"),
-        BotCommand(command="list", description="Список всех доменов"),
-        BotCommand(command="help", description="Справка по командам"),
+        BotCommand(command="start", description="Start the bot"),
+        BotCommand(command="list", description="List all domains"),
+        BotCommand(command="help", description="Help with commands"),
     ])
     await init_db()
     scheduler.add_job(check_all_domains, "interval", minutes=5)
