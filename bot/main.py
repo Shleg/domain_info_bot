@@ -338,8 +338,8 @@ async def main():
     await bot.set_my_commands([
         BotCommand(command="start", description="Start the bot"),
         BotCommand(command="list", description="List all domains"),
-        BotCommand(command="help", description="Support the roject via PayPal"),
-        BotCommand(command="donate", description="Help with commands"),
+        BotCommand(command="help", description="Help with commands"),
+        BotCommand(command="donate", description="Support the roject via PayPal"),
     ])
     await init_db()
     scheduler.add_job(check_all_domains, "interval", minutes=5)
