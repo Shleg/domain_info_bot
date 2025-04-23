@@ -9,11 +9,11 @@ Includes:
 import subprocess
 import re
 import httpx
-import whois
 import ssl
 import socket
 from datetime import datetime
 from typing import Dict, Any
+import asyncio
 
 
 def is_valid_domain(domain: str) -> bool:
@@ -64,7 +64,7 @@ async def check_http_https(domain: str) -> Dict[str, Dict[str, Any]]:
     return results
 
 
-def check_ssl(domain: str) -> Dict[str, Any]:
+def _check_ssl_sync(domain: str) -> Dict[str, Any]:
     """
     Checks the SSL certificate of a domain.
 
@@ -111,6 +111,8 @@ def check_ssl(domain: str) -> Dict[str, Any]:
             "error": str(e)
         }
 
+async def check_ssl(domain: str) -> Dict[str, Any]:
+    return await asyncio.to_thread(_check_ssl_sync, domain)
 
 # def check_domain_expiry(domain: str) -> Dict[str, Any]:
 #     """
@@ -157,7 +159,7 @@ def check_ssl(domain: str) -> Dict[str, Any]:
 #         }
 
 
-def check_domain_expiry(domain: str) -> Dict[str, Any]:
+def _check_domain_expiry_sync(domain: str) -> Dict[str, Any]:
     """
     Checks domain expiry using the system `whois` command for better TLD support.
     """
@@ -202,3 +204,7 @@ def check_domain_expiry(domain: str) -> Dict[str, Any]:
             "valid": False,
             "error": f"WHOIS error: {str(e)}"
         }
+
+
+async def check_domain_expiry(domain: str) -> Dict[str, Any]:
+    return await asyncio.to_thread(_check_domain_expiry_sync, domain)
