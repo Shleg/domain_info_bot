@@ -1,5 +1,6 @@
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, BotCommand
+from aiogram.types import Message, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
+
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 import asyncio
@@ -149,32 +150,24 @@ async def list_domains_handler(message: Message):
             await message.answer("🔍 There are no domains in the database yet.")
             return
 
-        text = "📝 List of monitored domains:\n"
-        for row in domains:
-            text += f"• {row.name}\n"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=row.name, callback_data=f"check:{row.name}")]
+            for row in domains
+        ])
 
-        await message.answer(text)
+        await message.answer("📝 Select a domain to check:", reply_markup=keyboard)
 
 
-@dp.message(F.text.startswith("/check"))
-async def check_domain_handler(message: Message):
+
+async def perform_check(message: Message, domain: str) -> None:
     """
-    Handler for the /check command.
     Performs a manual check of the specified domain's HTTP/HTTPS status, SSL certificate, and WHOIS info.
 
     Args:
-        message (Message): Telegram message object.
+        message (Message): Telegram message to reply to.
+        domain (str): Domain name to check.
     """
-    if not is_authorized(message.from_user.id):
-        await message.answer("⛔️ You do not have access to this command.")
-        return
 
-    parts = message.text.strip().split()
-    if len(parts) != 2:
-        await message.answer("⚠️ Use the command like this: <code>/check example.com</code>")
-        return
-
-    domain = parts[1].strip().lower()
     await message.answer(f"🔍 Checking <b>{domain}</b>...")
 
     results = await check_http_https(domain)
@@ -209,6 +202,46 @@ async def check_domain_handler(message: Message):
         reply += f"• ❌ WHOIS error: {whois_result['error']}\n"
 
     await message.answer(reply)
+
+
+@dp.message(F.text.startswith("/check"))
+async def check_domain_handler(message: Message):
+    """
+    Handler for the /check command.
+    Performs a manual check of the specified domain's HTTP/HTTPS status, SSL certificate, and WHOIS info.
+
+    Args:
+        message (Message): Telegram message object.
+    """
+    if not is_authorized(message.from_user.id):
+        await message.answer("⛔️ You do not have access to this command.")
+        return
+
+    parts = message.text.strip().split()
+    if len(parts) != 2:
+        await message.answer("⚠️ Use the command like this: <code>/check example.com</code>")
+        return
+
+    domain = parts[1].strip().lower()
+    await perform_check(message, domain)
+
+
+# Handler for inline check button callbacks
+from aiogram.types import CallbackQuery
+
+@dp.callback_query(F.data.startswith("check:"))
+async def handle_check_callback(callback: CallbackQuery):
+    """
+    Callback handler for inline domain check buttons.
+    Extracts the domain and performs a check.
+
+    Args:
+        callback (CallbackQuery): Telegram callback query.
+    """
+    domain = callback.data.split("check:")[1]
+    await perform_check(callback.message, domain)
+    await callback.answer()
+
 
 
 @dp.message(F.text.startswith("/remove"))
