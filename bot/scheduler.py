@@ -34,9 +34,9 @@ async def check_all_domains() -> None:
                 # Check HTTP and HTTPS availability asynchronously
                 http_result = await check_http_https(domain)
                 # Check SSL certificate synchronously
-                ssl_result = check_ssl(domain)
+                ssl_result = await check_ssl(domain)
                 # Check domain registration expiry synchronously
-                whois_result = check_domain_expiry(domain)
+                whois_result = await check_domain_expiry(domain)
 
                 problems = []
 

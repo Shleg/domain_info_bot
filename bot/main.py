@@ -187,7 +187,7 @@ async def check_domain_handler(message: Message):
         else:
             reply += f"• <b>{proto.upper()}</b>: ❌ {res['error']}\n"
 
-    ssl_result = check_ssl(domain)
+    ssl_result = await check_ssl(domain)
     reply += "\n🔐 <b>SSL Certificate:</b>\n"
     if ssl_result["valid"]:
         reply += (
@@ -198,7 +198,7 @@ async def check_domain_handler(message: Message):
     else:
         reply += f"• ❌ SSL check error: {ssl_result['error']}\n"
 
-    whois_result = check_domain_expiry(domain)
+    whois_result = await check_domain_expiry(domain)
     reply += "\n🌐 <b>Domain Registration:</b>\n"
     if whois_result["valid"]:
         reply += (
