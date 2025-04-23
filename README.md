@@ -20,6 +20,27 @@ A Telegram bot that monitors website availability and provides essential domain 
 
 ---
 
+## 📁 Project Structure
+
+```
+uptime_monitor/
+├── bot/                    # Telegram bot logic and commands
+│   ├── main.py             # Bot entry point
+│   └── handlers.py         # Telegram command handlers
+├── db/                     # Database models and connection
+│   ├── models.py           # SQLAlchemy models
+│   └── db.py               # Async DB engine and session
+├── utils/                  # Domain checking utilities (HTTP, SSL, WHOIS)
+│   └── utils.py
+├── config.py               # Environment configuration loader
+├── .env                    # Environment variable definitions
+├── Dockerfile              # Docker image setup
+├── docker-compose.yml      # Multi-container orchestration
+└── README.md
+```
+
+---
+
 ## 🚀 Features
 
 - **Website Monitoring**: Checks HTTP/HTTPS availability periodically.
