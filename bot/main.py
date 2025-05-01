@@ -8,6 +8,7 @@ import asyncio
 from config import BOT_TOKEN
 from db.db import init_db
 from db.models import Domain
+from db.models import UserSettings
 from db.db import SessionLocal
 from bot.utils import is_valid_domain, check_http_https, check_ssl, check_domain_expiry
 from bot.scheduler import scheduler, check_all_domains
@@ -75,6 +76,62 @@ async def cmd_help(message: Message):
     await message.answer(text)
 
 
+@dp.message(F.text.startswith("/settings"))
+async def cmd_settings(message: Message):
+    """
+    Handler for the /settings command.
+    Displays user-specific or domain-specific monitoring settings with toggle buttons.
+
+    Args:
+        message (Message): Telegram message object.
+    """
+    if not is_authorized(message.from_user.id):
+        await message.answer("⛔️ You do not have access to this command.")
+        return
+
+    parts = message.text.strip().split()
+    async with SessionLocal() as session:
+        # Domain-specific settings
+        if len(parts) == 2:
+            domain_name = parts[1].strip().lower()
+            domain_result = await session.execute(
+                Domain.__table__.select().where(
+                    Domain.name == domain_name,
+                    Domain.user_id == message.from_user.id
+                )
+            )
+            domain = domain_result.fetchone()
+            if not domain:
+                await message.answer("⚠️ This domain is not in your monitoring list.")
+                return
+
+            reply = f"⚙️ <b>Settings for domain:</b> <code>{domain_name}</code>\n"
+            reply += f"• HTTP: {'✅' if domain.track_http else '❌'}\n"
+            reply += f"• HTTPS: {'✅' if domain.track_https else '❌'}\n"
+            reply += f"• SSL: {'✅' if domain.track_ssl else '❌'}\n"
+            reply += f"• WHOIS: {'✅' if domain.track_whois else '❌'}\n"
+            reply += f"• SSL Warn: {domain.ssl_warn_days or '—'} days\n"
+            reply += f"• WHOIS Warn: {domain.whois_warn_days or '—'} days\n"
+
+            await message.answer(reply)
+            return
+
+        # Global settings
+        settings = await session.get(UserSettings, message.from_user.id)
+        if not settings:
+            settings = UserSettings(user_id=message.from_user.id)
+            session.add(settings)
+            await session.commit()
+
+        reply = f"⚙️ <b>Global settings:</b>\n"
+        reply += f"• HTTP: {'✅' if settings.track_http else '❌'}\n"
+        reply += f"• HTTPS: {'✅' if settings.track_https else '❌'}\n"
+        reply += f"• SSL: {'✅' if settings.track_ssl else '❌'}\n"
+        reply += f"• WHOIS: {'✅' if settings.track_whois else '❌'}\n"
+        reply += f"• SSL Warn: {settings.ssl_warn_days} days\n"
+        reply += f"• WHOIS Warn: {settings.whois_warn_days} days\n"
+
+        await message.answer(reply)
 
 
 @dp.message(F.text.startswith("/add"))
@@ -341,6 +398,7 @@ async def main():
         BotCommand(command="list", description="List all domains"),
         BotCommand(command="help", description="Help with commands"),
         BotCommand(command="donate", description="Support the project via PayPal"),
+        BotCommand(command="settings", description="Show or edit monitoring settings"),
     ])
     await init_db()
     scheduler.add_job(check_all_domains, "interval", minutes=5)
