@@ -5,6 +5,8 @@ from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 import asyncio
 
+from sqlalchemy import select
+
 from config import BOT_TOKEN
 from db.db import init_db
 from db.models import Domain
@@ -14,6 +16,8 @@ from bot.utils import is_valid_domain, check_http_https, check_ssl, check_domain
 from bot.scheduler import scheduler, check_all_domains
 
 from config import ALLOWED_USER_IDS
+
+from bot.handlers.settings import settings_router
 
 def is_authorized(user_id: int) -> bool:
     """
@@ -65,73 +69,18 @@ async def cmd_help(message: Message):
         return
 
     text = (
-        "🤖 <b>Bot commands:</b>\n\n"
+        "🤖 <b>Available commands:</b>\n\n"
         "<b>/add example.com</b> — add a domain for monitoring\n"
         "<b>/remove example.com</b> — remove a domain from monitoring\n"
         "<b>/list</b> — show all monitored domains\n"
+        "<b>/settings</b> — common settings\n"
+        "<b>/settings example.com</b> — individual settings\n"
         "<b>/check example.com</b> — manually check a domain\n"
         "<b>/help</b> — show this help message\n"
         "<b>/donate </b> — support the project via PayPal"
     )
     await message.answer(text)
 
-
-@dp.message(F.text.startswith("/settings"))
-async def cmd_settings(message: Message):
-    """
-    Handler for the /settings command.
-    Displays user-specific or domain-specific monitoring settings with toggle buttons.
-
-    Args:
-        message (Message): Telegram message object.
-    """
-    if not is_authorized(message.from_user.id):
-        await message.answer("⛔️ You do not have access to this command.")
-        return
-
-    parts = message.text.strip().split()
-    async with SessionLocal() as session:
-        # Domain-specific settings
-        if len(parts) == 2:
-            domain_name = parts[1].strip().lower()
-            domain_result = await session.execute(
-                Domain.__table__.select().where(
-                    Domain.name == domain_name,
-                    Domain.user_id == message.from_user.id
-                )
-            )
-            domain = domain_result.fetchone()
-            if not domain:
-                await message.answer("⚠️ This domain is not in your monitoring list.")
-                return
-
-            reply = f"⚙️ <b>Settings for domain:</b> <code>{domain_name}</code>\n"
-            reply += f"• HTTP: {'✅' if domain.track_http else '❌'}\n"
-            reply += f"• HTTPS: {'✅' if domain.track_https else '❌'}\n"
-            reply += f"• SSL: {'✅' if domain.track_ssl else '❌'}\n"
-            reply += f"• WHOIS: {'✅' if domain.track_whois else '❌'}\n"
-            reply += f"• SSL Warn: {domain.ssl_warn_days or '—'} days\n"
-            reply += f"• WHOIS Warn: {domain.whois_warn_days or '—'} days\n"
-
-            await message.answer(reply)
-            return
-
-        # Global settings
-        settings = await session.get(UserSettings, message.from_user.id)
-        if not settings:
-            settings = UserSettings(user_id=message.from_user.id)
-            session.add(settings)
-            await session.commit()
-
-        reply = f"⚙️ <b>Global settings:</b>\n"
-        reply += f"• HTTP: {'✅' if settings.track_http else '❌'}\n"
-        reply += f"• HTTPS: {'✅' if settings.track_https else '❌'}\n"
-        reply += f"• SSL: {'✅' if settings.track_ssl else '❌'}\n"
-        reply += f"• WHOIS: {'✅' if settings.track_whois else '❌'}\n"
-        reply += f"• SSL Warn: {settings.ssl_warn_days} days\n"
-        reply += f"• WHOIS Warn: {settings.whois_warn_days} days\n"
-
-        await message.answer(reply)
 
 
 @dp.message(F.text.startswith("/add"))
@@ -217,47 +166,79 @@ async def list_domains_handler(message: Message):
 
 
 
-async def perform_check(message: Message, domain: str) -> None:
-    """
-    Performs a manual check of the specified domain's HTTP/HTTPS status, SSL certificate, and WHOIS info.
+from typing import Union
+from aiogram.types import Message, CallbackQuery
 
-    Args:
-        message (Message): Telegram message to reply to.
-        domain (str): Domain name to check.
-    """
+async def perform_check(source: Union[Message, CallbackQuery], domain: str) -> None:
+    if isinstance(source, CallbackQuery):
+        user_id = source.from_user.id
+        message = source.message
+    else:
+        user_id = source.from_user.id
+        message = source
 
     await message.answer(f"🔍 Checking <b>{domain}</b>...")
 
-    results = await check_http_https(domain)
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(Domain).where(
+                Domain.name == domain,
+                Domain.user_id == user_id
+            )
+        )
+        domain_row = result.scalar_one_or_none()
+        if domain_row is None:
+            await message.answer("⚠️ Domain not found.")
+            return
+
+        settings = await session.get(UserSettings, user_id)
+        if settings is None:
+            settings = UserSettings(user_id=user_id)
+            session.add(settings)
+            await session.commit()
+
+        # Determine which settings to use
+        track_http = domain_row.track_http if domain_row.track_http is not None else settings.track_http
+        track_https = domain_row.track_https if domain_row.track_https is not None else settings.track_https
+        track_ssl = domain_row.track_ssl if domain_row.track_ssl is not None else settings.track_ssl
+        track_whois = domain_row.track_whois if domain_row.track_whois is not None else settings.track_whois
+        ssl_warn_days = domain_row.ssl_warn_days or settings.ssl_warn_days
+        whois_warn_days = domain_row.whois_warn_days or settings.whois_warn_days
 
     reply = f"📊 Check results for <b>{domain}</b>:\n"
-    for proto in ["http", "https"]:
-        res = results.get(proto)
-        if res["status"] == "ok":
-            reply += f"• <b>{proto.upper()}</b>: ✅ {res['code']}\n"
+
+    if track_http or track_https:
+        results = await check_http_https(domain)
+        for proto in ["http", "https"]:
+            if (proto == "http" and track_http) or (proto == "https" and track_https):
+                res = results.get(proto)
+                if res["status"] == "ok":
+                    reply += f"• <b>{proto.upper()}</b>: ✅ {res['code']}\n"
+                else:
+                    reply += f"• <b>{proto.upper()}</b>: ❌ {res['error']}\n"
+
+    if track_ssl:
+        ssl_result = await check_ssl(domain)
+        reply += "\n🔐 <b>SSL Certificate:</b>\n"
+        if ssl_result["valid"]:
+            reply += (
+                f"• Issuer: {ssl_result['issuer']}\n"
+                f"• Valid until: {ssl_result['expires_at']}\n"
+                f"• Days left: {ssl_result['days_left']}\n"
+            )
         else:
-            reply += f"• <b>{proto.upper()}</b>: ❌ {res['error']}\n"
+            reply += f"• ❌ SSL check error: {ssl_result['error']}\n"
 
-    ssl_result = await check_ssl(domain)
-    reply += "\n🔐 <b>SSL Certificate:</b>\n"
-    if ssl_result["valid"]:
-        reply += (
-            f"• Issuer: {ssl_result['issuer']}\n"
-            f"• Valid until: {ssl_result['expires_at']}\n"
-            f"• Days left: {ssl_result['days_left']}\n"
-        )
-    else:
-        reply += f"• ❌ SSL check error: {ssl_result['error']}\n"
-
-    whois_result = await check_domain_expiry(domain)
-    reply += "\n🌐 <b>Domain Registration:</b>\n"
-    if whois_result["valid"]:
-        reply += (
-            f"• Expires on: {whois_result['expires_at']}\n"
-            f"• Days left: {whois_result['days_left']}\n"
-        )
-    else:
-        reply += f"• ❌ WHOIS error: {whois_result['error']}\n"
+    if track_whois:
+        whois_result = await check_domain_expiry(domain)
+        reply += "\n🌐 <b>Domain Registration:</b>\n"
+        if whois_result["valid"]:
+            reply += (
+                f"• Expires on: {whois_result['expires_at']}\n"
+                f"• Days left: {whois_result['days_left']}\n"
+            )
+        else:
+            reply += f"• ❌ WHOIS error: {whois_result['error']}\n"
 
     await message.answer(reply)
 
@@ -297,7 +278,7 @@ async def handle_check_callback(callback: CallbackQuery):
         callback (CallbackQuery): Telegram callback query.
     """
     domain = callback.data.split("check:")[1]
-    await perform_check(callback.message, domain)
+    await perform_check(callback, domain)
     await callback.answer()
 
 
@@ -364,6 +345,112 @@ async def cmd_donate(message: Message):
         reply_markup=keyboard
     )
 
+
+
+@dp.message(F.text.startswith("/settings"))
+async def cmd_settings(message: Message):
+    """
+    Handler for the /settings command.
+    Displays user-specific or domain-specific monitoring settings with toggle buttons.
+
+    Args:
+        message (Message): Telegram message object.
+    """
+    if not is_authorized(message.from_user.id):
+        await message.answer("⛔️ You do not have access to this command.")
+        return
+
+    parts = message.text.strip().split()
+    async with SessionLocal() as session:
+        # Domain-specific settings
+        if len(parts) == 2:
+            domain_name = parts[1].strip().lower()
+            domain_result = await session.execute(
+                Domain.__table__.select().where(
+                    Domain.name == domain_name,
+                    Domain.user_id == message.from_user.id
+                )
+            )
+            domain = domain_result.fetchone()
+            if not domain:
+                await message.answer("⚠️ This domain is not in your monitoring list.")
+                return
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=f"HTTP {'✅' if domain.track_http else '❌'}",
+                        callback_data=f"toggle:domain:{domain_name}:track_http"
+                    ),
+                    InlineKeyboardButton(
+                        text=f"HTTPS {'✅' if domain.track_https else '❌'}",
+                        callback_data=f"toggle:domain:{domain_name}:track_https"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text=f"SSL {'✅' if domain.track_ssl else '❌'}",
+                        callback_data=f"toggle:domain:{domain_name}:track_ssl"
+                    ),
+                    InlineKeyboardButton(
+                        text=f"WHOIS {'✅' if domain.track_whois else '❌'}",
+                        callback_data=f"toggle:domain:{domain_name}:track_whois"
+                    )
+                ]
+            ])
+
+            reply = f"⚙️ <b>Settings for domain:</b> <code>{domain_name}</code>\n"
+            reply += f"• HTTP: {'✅' if domain.track_http else '❌'}\n"
+            reply += f"• HTTPS: {'✅' if domain.track_https else '❌'}\n"
+            reply += f"• SSL: {'✅' if domain.track_ssl else '❌'}\n"
+            reply += f"• WHOIS: {'✅' if domain.track_whois else '❌'}\n"
+            reply += f"• SSL Warn: {domain.ssl_warn_days or '—'} days\n"
+            reply += f"• WHOIS Warn: {domain.whois_warn_days or '—'} days\n"
+
+            await message.answer(reply, reply_markup=keyboard)
+            return
+
+        # Global settings
+        settings = await session.get(UserSettings, message.from_user.id)
+        if not settings:
+            settings = UserSettings(user_id=message.from_user.id)
+            session.add(settings)
+            await session.commit()
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"HTTP {'✅' if settings.track_http else '❌'}",
+                    callback_data="toggle:global:track_http"
+                ),
+                InlineKeyboardButton(
+                    text=f"HTTPS {'✅' if settings.track_https else '❌'}",
+                    callback_data="toggle:global:track_https"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"SSL {'✅' if settings.track_ssl else '❌'}",
+                    callback_data="toggle:global:track_ssl"
+                ),
+                InlineKeyboardButton(
+                    text=f"WHOIS {'✅' if settings.track_whois else '❌'}",
+                    callback_data="toggle:global:track_whois"
+                )
+            ]
+        ])
+
+        reply = f"⚙️ <b>Global settings:</b>\n"
+        reply += f"• HTTP: {'✅' if settings.track_http else '❌'}\n"
+        reply += f"• HTTPS: {'✅' if settings.track_https else '❌'}\n"
+        reply += f"• SSL: {'✅' if settings.track_ssl else '❌'}\n"
+        reply += f"• WHOIS: {'✅' if settings.track_whois else '❌'}\n"
+        reply += f"• SSL Warn: {settings.ssl_warn_days} days\n"
+        reply += f"• WHOIS Warn: {settings.whois_warn_days} days\n"
+
+        await message.answer(reply, reply_markup=keyboard)
+
+
 @dp.message()
 async def fallback_handler(message: Message):
     """
@@ -381,12 +468,13 @@ async def fallback_handler(message: Message):
         "<b>/add example.com</b> — add a domain for monitoring\n"
         "<b>/remove example.com</b> — remove a domain from monitoring\n"
         "<b>/list</b> — show all monitored domains\n"
+        "<b>/settings</b> — common settings\n"
+        "<b>/settings example.com</b> — individual settings\n"
         "<b>/check example.com</b> — manually check a domain\n"
         "<b>/help</b> — show this help message\n"
         "<b>/donate </b> — support the project via PayPal"
     )
     await message.answer(text)
-
 
 async def main():
     """
@@ -396,13 +484,14 @@ async def main():
     await bot.set_my_commands([
         BotCommand(command="start", description="Start the bot"),
         BotCommand(command="list", description="List all domains"),
+        BotCommand(command="settings", description="Show or edit monitoring settings"),
         BotCommand(command="help", description="Help with commands"),
         BotCommand(command="donate", description="Support the project via PayPal"),
-        BotCommand(command="settings", description="Show or edit monitoring settings"),
     ])
     await init_db()
     scheduler.add_job(check_all_domains, "interval", minutes=5)
     scheduler.start()
+    dp.include_router(settings_router)
     await dp.start_polling(bot)
 
 

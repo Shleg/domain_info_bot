@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, Integer, String, DateTime, UniqueConstraint, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, UniqueConstraint, Boolean, BigInteger
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import declarative_base
 
@@ -31,7 +31,7 @@ class Domain(AsyncAttrs, Base):
 
     id: int = Column(Integer, primary_key=True, index=True)
     name: str = Column(String, nullable=False, index=True)
-    user_id: int = Column(Integer, nullable=False, index=True)
+    user_id: int = Column(BigInteger, nullable=False, index=True)
     added_at: datetime.datetime = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     track_http: bool = Column(Boolean, nullable=True)
     track_https: bool = Column(Boolean, nullable=True)
@@ -60,7 +60,7 @@ class UserSettings(AsyncAttrs, Base):
     """
     __tablename__ = "user_settings"
 
-    user_id: int = Column(Integer, primary_key=True)
+    user_id: int = Column(BigInteger, primary_key=True)
     track_http: bool = Column(Boolean, default=True)
     track_https: bool = Column(Boolean, default=True)
     track_ssl: bool = Column(Boolean, default=True)
