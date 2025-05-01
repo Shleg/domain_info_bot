@@ -341,6 +341,8 @@ async def cmd_donate(message: Message):
 
     await message.answer(
         "🙏 If you'd like to support this project, you can make a donation via PayPal.\n\n"
+        "💳 <b>PayPal</b>: via the button below\n\n"
+        "💸 <b>Crypto (USDT, TRC20)</b>: <code>TUGi5pzSnM6kqpXMHkXiPL6yFyGmC9vAje</code>\n"
         "Every contribution helps keep the bot alive and improving. Thank you! 💙",
         reply_markup=keyboard
     )

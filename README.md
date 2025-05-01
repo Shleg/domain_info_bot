@@ -94,3 +94,10 @@ docker compose up
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+## 🤝 Contributing or Forking
+
+If you find this project useful and decide to fork or adapt it, please consider crediting the original work:
+https://github.com/Shleg/domain_info_bot
+
+Thank you for supporting open-source development!
