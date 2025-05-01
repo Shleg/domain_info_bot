@@ -52,7 +52,9 @@ async def cmd_start(message: Message):
         await message.answer("⛔️ You do not have access to this command.")
         return
 
-    await message.answer("👋 Hi! I'm monitoring websites. Send me a domain to start monitoring it.")
+    await message.answer(
+        "👋 Hi! I'm monitoring websites. Send me a domain to start monitoring it.\n\n"
+        "ℹ️ Type /help to see available commands and instructions.")
 
 
 @dp.message(F.text == "/help")
@@ -337,7 +339,7 @@ async def cmd_donate(message: Message):
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💖 Donate via PayPal", url="https://www.paypal.com/donate/?hosted_button_id=7LZ3SYG7H69JY")],
-        [InlineKeyboardButton(text="📋 Copy crypto address", callback_data="copy_crypto")]
+        [InlineKeyboardButton(text="📋 Get crypto address", callback_data="copy_crypto")]
     ])
 
     await message.answer(
@@ -497,8 +499,8 @@ async def main():
         BotCommand(command="start", description="Start the bot"),
         BotCommand(command="list", description="List all domains"),
         BotCommand(command="settings", description="Show or edit monitoring settings"),
-        BotCommand(command="help", description="Help with commands"),
         BotCommand(command="donate", description="Support the project via PayPal"),
+        BotCommand(command="help", description="Help with commands"),
     ])
     await init_db()
     scheduler.add_job(check_all_domains, "interval", minutes=5)
