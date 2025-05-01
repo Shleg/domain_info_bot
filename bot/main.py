@@ -495,6 +495,7 @@ async def main():
     Main entry point of the bot.
     Sets commands, initializes the database, starts the scheduler, and begins polling.
     """
+    await bot.delete_my_commands()
     await bot.set_my_commands([
         BotCommand(command="start", description="Start the bot"),
         BotCommand(command="list", description="List all domains"),
