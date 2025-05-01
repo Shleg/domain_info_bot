@@ -336,17 +336,27 @@ async def cmd_donate(message: Message):
         return
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💖 Donate via PayPal", url="https://www.paypal.com/donate/?hosted_button_id=7LZ3SYG7H69JY")]
+        [InlineKeyboardButton(text="💖 Donate via PayPal", url="https://www.paypal.com/donate/?hosted_button_id=7LZ3SYG7H69JY")],
+        [InlineKeyboardButton(text="📋 Copy crypto address", callback_data="copy_crypto")]
     ])
 
     await message.answer(
-        "🙏 If you'd like to support this project, you can make a donation via PayPal.\n\n"
-        "💳 <b>PayPal</b>: via the button below\n\n"
-        "💸 <b>Crypto (USDT, TRC20)</b>: <code>TUGi5pzSnM6kqpXMHkXiPL6yFyGmC9vAje</code>\n"
+        "🙏 If you'd like to support this project, you can make a donation:\n\n"
+        "💳 <b>PayPal</b>: via the button below\n"
+        "💸 <b>Crypto (USDT, TRC20)</b>: press the button to get the address\n\n"
         "Every contribution helps keep the bot alive and improving. Thank you! 💙",
         reply_markup=keyboard
     )
 
+
+@dp.callback_query(F.data == "copy_crypto")
+async def copy_crypto_handler(callback: CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("⛔️ Not allowed", show_alert=True)
+        return
+
+    await callback.message.answer("Here is the wallet address 👇")
+    await callback.message.answer("<code>TUGi5pzSnM6kqpXMHkXiPL6yFyGmC9vAje</code>")
 
 
 @dp.message(F.text.startswith("/settings"))
