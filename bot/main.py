@@ -471,7 +471,7 @@ async def fallback_handler(message: Message):
         "<b>/remove example.com</b> — remove a domain from monitoring\n"
         "<b>/list</b> — show all monitored domains\n"
         "<b>/settings</b> — common settings\n"
-        "<b>/settings example.com</b> — individual settings\n"
+        # "<b>/settings example.com</b> — individual settings\n"
         "<b>/check example.com</b> — manually check a domain\n"
         "<b>/help</b> — show this help message\n"
         "<b>/donate </b> — support the project via PayPal"
