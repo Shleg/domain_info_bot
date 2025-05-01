@@ -90,3 +90,7 @@ docker compose up
 - **/remove <domain> – Remove a domain from your monitoring list**
 - **/list – List all monitored domains**
 - **/check <domain> – Manually check a domain’s status**
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
