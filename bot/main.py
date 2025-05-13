@@ -13,7 +13,7 @@ from db.models import Domain
 from db.models import UserSettings
 from db.db import SessionLocal
 from bot.utils import is_valid_domain, check_http_https, check_ssl, check_domain_expiry
-from bot.scheduler import scheduler, check_all_domains
+from bot.scheduler import scheduler, check_http_https_domains, check_ssl_whois_domains
 
 from config import ALLOWED_USER_IDS
 
@@ -504,7 +504,9 @@ async def main():
         BotCommand(command="help", description="Help with commands"),
     ])
     await init_db()
-    scheduler.add_job(check_all_domains, "interval", minutes=5)
+    # scheduler.add_job(check_all_domains, "interval", minutes=10)
+    scheduler.add_job(check_http_https_domains, "interval", minutes=10)
+    scheduler.add_job(check_ssl_whois_domains, "cron", hour=4, minute=0)
     scheduler.start()
     dp.include_router(settings_router)
     await dp.start_polling(bot)

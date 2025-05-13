@@ -18,11 +18,10 @@ from config import BOT_TOKEN
 scheduler: AsyncIOScheduler = AsyncIOScheduler()
 bot = Bot(token=BOT_TOKEN)
 
-async def check_all_domains() -> None:
-    """
-    Periodically checks all domains for availability, SSL validity, and WHOIS expiration.
-    Sends a Telegram notification to the user if any issue is detected.
-    """
+def get_value(domain_value, settings_value):
+    return domain_value if domain_value is not None else settings_value
+
+async def check_http_https_domains() -> None:
     async with SessionLocal() as session:
         result = await session.execute(Domain.__table__.select())
         domains = result.fetchall()
@@ -31,17 +30,11 @@ async def check_all_domains() -> None:
             domain = row.name
             user_id = row.user_id
 
-            # Get user settings
             user_settings = await session.get(UserSettings, user_id)
-
-            # fallback helper
-            def get_value(domain_value, settings_value):
-                return domain_value if domain_value is not None else settings_value
 
             try:
                 problems = []
 
-                # HTTP/HTTPS availability checks
                 if get_value(row.track_http, user_settings.track_http):
                     http_result = await check_http_https(domain)
                     if http_result.get("http", {}).get("status") != "ok":
@@ -51,23 +44,40 @@ async def check_all_domains() -> None:
                     if http_result.get("https", {}).get("status") != "ok":
                         problems.append(f"HTTPS ❌ ({http_result['https'].get('error', 'error')})")
 
-                # SSL certificate checks
+                if problems:
+                    text = f"🚨 Availability issues for domain <b>{domain}</b>:\n" + "\n".join(f"• {p}" for p in problems)
+                    await bot.send_message(user_id, text)
+            except Exception as e:
+                await bot.send_message(user_id, f"❌ Error checking HTTP/HTTPS for {domain}: {str(e)}")
+
+async def check_ssl_whois_domains() -> None:
+    async with SessionLocal() as session:
+        result = await session.execute(Domain.__table__.select())
+        domains = result.fetchall()
+
+        for row in domains:  # type: Any
+            domain = row.name
+            user_id = row.user_id
+
+            user_settings = await session.get(UserSettings, user_id)
+
+            try:
+                problems = []
+
                 if get_value(row.track_ssl, user_settings.track_ssl):
                     ssl_result = await check_ssl(domain)
                     ssl_days = get_value(row.ssl_warn_days, user_settings.ssl_warn_days)
                     if not ssl_result["valid"] or ssl_result.get("days_left", 0) < ssl_days:
                         problems.append("SSL certificate is expiring or invalid ⚠️")
 
-                # WHOIS/domain expiration checks
                 if get_value(row.track_whois, user_settings.track_whois):
                     whois_result = await check_domain_expiry(domain)
                     whois_days = get_value(row.whois_warn_days, user_settings.whois_warn_days)
                     if not whois_result["valid"] or whois_result.get("days_left", 0) < whois_days:
                         problems.append("Domain registration is expiring ⚠️")
 
-                # Send notification if any issues detected
                 if problems:
-                    text = f"🚨 Issues detected for domain <b>{domain}</b>:\n" + "\n".join(f"• {p}" for p in problems)
+                    text = f"🚨 Expiry issues for domain <b>{domain}</b>:\n" + "\n".join(f"• {p}" for p in problems)
                     await bot.send_message(user_id, text)
             except Exception as e:
-                await bot.send_message(user_id, f"❌ Error occurred while checking {domain}: {str(e)}")
+                await bot.send_message(user_id, f"❌ Error checking SSL/WHOIS for {domain}: {str(e)}")
