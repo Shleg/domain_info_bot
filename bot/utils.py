@@ -32,7 +32,7 @@ def is_valid_domain(domain: str) -> bool:
 
 async def check_http_https(domain: str) -> Dict[str, Dict[str, Any]]:
     """
-    Checks domain availability over HTTP and HTTPS protocols.
+    Checks domain availability over HTTP and HTTPS protocols in parallel, reusing a single AsyncClient.
 
     Args:
         domain (str): The domain name to check.
@@ -45,21 +45,25 @@ async def check_http_https(domain: str) -> Dict[str, Dict[str, Any]]:
               }
     """
     results = {}
+    protocols = ["http", "https"]
 
-    for protocol in ["http", "https"]:
+    async def fetch(protocol: str, client: httpx.AsyncClient):
         url = f"{protocol}://{domain}"
         try:
-            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-                response = await client.get(url)
-                results[protocol] = {
-                    "status": "ok",
-                    "code": response.status_code
-                }
+            response = await client.get(url)
+            return protocol, {"status": "ok", "code": response.status_code}
         except httpx.RequestError as e:
-            results[protocol] = {
-                "status": "fail",
-                "error": str(e)
-            }
+            error_msg = str(e) or f"{protocol.upper()} request failed"
+            return protocol, {"status": "fail", "error": error_msg}
+        except Exception as e:
+            error_msg = str(e) or f"Unknown error during {protocol.upper()} check"
+            return protocol, {"status": "fail", "error": error_msg}
+
+    async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+        tasks = [fetch(proto, client) for proto in protocols]
+        results_list = await asyncio.gather(*tasks)
+        for proto, result in results_list:
+            results[proto] = result
 
     return results
 
