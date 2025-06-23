@@ -120,7 +120,7 @@ mongo/
 
 # --- 🔧 CI/CD и конфигурационные файлы ---
 .circleci/
-.github/
+#.github/
 .gitlab-ci.yml
 *.code-workspace
 *.tfstate
