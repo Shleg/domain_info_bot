@@ -33,35 +33,62 @@ def is_valid_domain(domain: str) -> bool:
 async def check_http_https(domain: str) -> Dict[str, Dict[str, Any]]:
     """
     Checks domain availability over HTTP and HTTPS protocols in parallel, reusing a single AsyncClient.
-
-    Args:
-        domain (str): The domain name to check.
-
-    Returns:
-        dict: A dictionary with status per protocol:
-              {
-                  "http": {"status": "ok", "code": 200},
-                  "https": {"status": "fail", "error": "..."}
-              }
+    Makes up to 3 attempts with httpx, then tries curl if all fail. Only notifies if all fail.
     """
     results = {}
     protocols = ["http", "https"]
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Connection": "keep-alive"
+    }
 
-    async def fetch(protocol: str, client: httpx.AsyncClient):
+    async def fetch_with_retries(protocol: str, client: httpx.AsyncClient):
         url = f"{protocol}://{domain}"
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = await client.get(url, headers=headers)
+                return protocol, {"status": "ok", "code": response.status_code}
+            except Exception as e:
+                last_error = str(e)
+                await asyncio.sleep(1)
+        # If all httpx attempts failed, try curl
+        curl_result = await run_curl_check(url)
+        if curl_result["ok"]:
+            return protocol, {"status": "ok", "code": curl_result["code"]}
+        else:
+            return protocol, {"status": "fail", "error": f"httpx: {last_error}; curl: {curl_result['error']}"}
+
+    async def run_curl_check(url: str) -> dict:
+        # Compose curl command with headers
+        curl_cmd = [
+            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+            "-A", headers["User-Agent"],
+            "-H", f"Accept: {headers['Accept']}",
+            "-H", f"Accept-Language: {headers['Accept-Language']}",
+            "-H", f"Connection: {headers['Connection']}",
+            "--max-time", "10",
+            url
+        ]
         try:
-            response = await client.get(url, headers=headers)
-            return protocol, {"status": "ok", "code": response.status_code}
-        except httpx.RequestError as e:
-            error_msg = str(e) or f"{protocol.upper()} request failed"
-            return protocol, {"status": "fail", "error": error_msg}
+            proc = await asyncio.create_subprocess_exec(
+                *curl_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            code = stdout.decode().strip()
+            if code.isdigit() and int(code) < 600:
+                return {"ok": True, "code": int(code)}
+            else:
+                return {"ok": False, "error": f"curl status: {code}, stderr: {stderr.decode().strip()}"}
         except Exception as e:
-            error_msg = str(e) or f"Unknown error during {protocol.upper()} check"
-            return protocol, {"status": "fail", "error": error_msg}
+            return {"ok": False, "error": str(e)}
 
     async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-        tasks = [fetch(proto, client) for proto in protocols]
+        tasks = [fetch_with_retries(proto, client) for proto in protocols]
         results_list = await asyncio.gather(*tasks)
         for proto, result in results_list:
             results[proto] = result
