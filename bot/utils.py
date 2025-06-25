@@ -46,11 +46,12 @@ async def check_http_https(domain: str) -> Dict[str, Dict[str, Any]]:
     """
     results = {}
     protocols = ["http", "https"]
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"}
 
     async def fetch(protocol: str, client: httpx.AsyncClient):
         url = f"{protocol}://{domain}"
         try:
-            response = await client.get(url)
+            response = await client.get(url, headers=headers)
             return protocol, {"status": "ok", "code": response.status_code}
         except httpx.RequestError as e:
             error_msg = str(e) or f"{protocol.upper()} request failed"
