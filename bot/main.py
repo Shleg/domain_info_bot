@@ -182,6 +182,7 @@ async def perform_check(source: Union[Message, CallbackQuery], domain: str) -> N
     await message.answer(f"🔍 Checking <b>{domain}</b>...")
 
     async with SessionLocal() as session:
+        # Try to find domain in DB
         result = await session.execute(
             select(Domain).where(
                 Domain.name == domain,
@@ -189,23 +190,28 @@ async def perform_check(source: Union[Message, CallbackQuery], domain: str) -> N
             )
         )
         domain_row = result.scalar_one_or_none()
-        if domain_row is None:
-            await message.answer("⚠️ Domain not found.")
-            return
-
         settings = await session.get(UserSettings, user_id)
         if settings is None:
             settings = UserSettings(user_id=user_id)
             session.add(settings)
             await session.commit()
 
-        # Determine which settings to use
-        track_http = domain_row.track_http if domain_row.track_http is not None else settings.track_http
-        track_https = domain_row.track_https if domain_row.track_https is not None else settings.track_https
-        track_ssl = domain_row.track_ssl if domain_row.track_ssl is not None else settings.track_ssl
-        track_whois = domain_row.track_whois if domain_row.track_whois is not None else settings.track_whois
-        ssl_warn_days = domain_row.ssl_warn_days or settings.ssl_warn_days
-        whois_warn_days = domain_row.whois_warn_days or settings.whois_warn_days
+        # If domain is not in DB, use default settings for one-time check
+        if domain_row is None:
+            # Use global settings if available, else hardcoded defaults
+            track_http = getattr(settings, 'track_http', True)
+            track_https = getattr(settings, 'track_https', True)
+            track_ssl = getattr(settings, 'track_ssl', True)
+            track_whois = getattr(settings, 'track_whois', True)
+            ssl_warn_days = getattr(settings, 'ssl_warn_days', 14)
+            whois_warn_days = getattr(settings, 'whois_warn_days', 30)
+        else:
+            track_http = domain_row.track_http if domain_row.track_http is not None else settings.track_http
+            track_https = domain_row.track_https if domain_row.track_https is not None else settings.track_https
+            track_ssl = domain_row.track_ssl if domain_row.track_ssl is not None else settings.track_ssl
+            track_whois = domain_row.track_whois if domain_row.track_whois is not None else settings.track_whois
+            ssl_warn_days = domain_row.ssl_warn_days or settings.ssl_warn_days
+            whois_warn_days = domain_row.whois_warn_days or settings.whois_warn_days
 
     reply = f"📊 Check results for <b>{domain}</b>:\n"
 
