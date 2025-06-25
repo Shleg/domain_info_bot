@@ -14,6 +14,8 @@ from db.models import Domain, UserSettings
 from bot.utils import check_http_https, check_ssl, check_domain_expiry
 from aiogram import Bot
 from config import BOT_TOKEN
+import random
+import asyncio
 
 scheduler: AsyncIOScheduler = AsyncIOScheduler()
 bot = Bot(token=BOT_TOKEN)
@@ -22,33 +24,34 @@ def get_value(domain_value, settings_value):
     return domain_value if domain_value is not None else settings_value
 
 async def check_http_https_domains() -> None:
+    semaphore = asyncio.Semaphore(5)
     async with SessionLocal() as session:
         result = await session.execute(Domain.__table__.select())
         domains = result.fetchall()
 
-        for row in domains:  # type: Any
+        async def check_one(row):
             domain = row.name
             user_id = row.user_id
-
             user_settings = await session.get(UserSettings, user_id)
+            await asyncio.sleep(random.uniform(1, 2))  # jitter delay
+            async with semaphore:
+                try:
+                    problems = []
+                    if get_value(row.track_http, user_settings.track_http):
+                        http_result = await check_http_https(domain)
+                        if http_result.get("http", {}).get("status") != "ok":
+                            problems.append(f"HTTP ❌ ({http_result['http'].get('error', 'error')})")
+                    if get_value(row.track_https, user_settings.track_https):
+                        http_result = http_result if "http_result" in locals() else await check_http_https(domain)
+                        if http_result.get("https", {}).get("status") != "ok":
+                            problems.append(f"HTTPS ❌ ({http_result['https'].get('error', 'error')})")
+                    if problems:
+                        text = f"🚨 Availability issues for domain <b>{domain}</b>:\n" + "\n".join(f"• {p}" for p in problems)
+                        await bot.send_message(user_id, text)
+                except Exception as e:
+                    await bot.send_message(user_id, f"❌ Error checking HTTP/HTTPS for {domain}: {str(e)}")
 
-            try:
-                problems = []
-
-                if get_value(row.track_http, user_settings.track_http):
-                    http_result = await check_http_https(domain)
-                    if http_result.get("http", {}).get("status") != "ok":
-                        problems.append(f"HTTP ❌ ({http_result['http'].get('error', 'error')})")
-                if get_value(row.track_https, user_settings.track_https):
-                    http_result = http_result if "http_result" in locals() else await check_http_https(domain)
-                    if http_result.get("https", {}).get("status") != "ok":
-                        problems.append(f"HTTPS ❌ ({http_result['https'].get('error', 'error')})")
-
-                if problems:
-                    text = f"🚨 Availability issues for domain <b>{domain}</b>:\n" + "\n".join(f"• {p}" for p in problems)
-                    await bot.send_message(user_id, text)
-            except Exception as e:
-                await bot.send_message(user_id, f"❌ Error checking HTTP/HTTPS for {domain}: {str(e)}")
+        await asyncio.gather(*(check_one(row) for row in domains))
 
 async def check_ssl_whois_domains() -> None:
     async with SessionLocal() as session:
