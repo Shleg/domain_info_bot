@@ -203,31 +203,42 @@ def _check_domain_expiry_sync(domain: str) -> Dict[str, Any]:
 
         output = result.stdout
 
-        # Try multiple patterns for expiration date
+        # More specific lines first — generic "Expiry Date:" matches inside
+        # "Registry Expiry Date:" and would capture ISO strings with fractional
+        # seconds (e.g. ...59.000Z) that plain %S%Z formats do not parse.
         patterns = [
-            r"Expiry Date:\s?(.+)",
-            r"Expiration Date:\s?(.+)",
-            r"Registry Expiry Date:\s?(.+)",
-            r"paid-till:\s?(.+)"
+            r"Registry Expiry Date:\s*(.+)",
+            r"Registrar Registration Expiration Date:\s*(.+)",
+            r"paid-till:\s*(.+)",
+            r"Expiry Date:\s*(.+)",
+            r"Expiration Date:\s*(.+)",
         ]
 
-        for pattern in patterns:
-            match = re.search(pattern, output)
-            if match:
-                date_str = match.group(1).strip()
+        iso_formats = (
+            "%Y-%m-%dT%H:%M:%S.%fZ",
+            "%Y-%m-%dT%H:%M:%SZ",
+            "%Y-%m-%d",
+            "%d-%b-%Y",
+            "%Y.%m.%d",
+        )
 
-                # Try parsing multiple formats
-                for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%Y.%m.%d", "%Y-%m-%dT%H:%M:%SZ"):
-                    try:
-                        expires_at = datetime.strptime(date_str, fmt)
-                        days_left = (expires_at - datetime.utcnow()).days
-                        return {
-                            "valid": True,
-                            "expires_at": expires_at.strftime("%Y-%m-%d"),
-                            "days_left": days_left
-                        }
-                    except ValueError:
-                        continue
+        for pattern in patterns:
+            match = re.search(pattern, output, re.IGNORECASE)
+            if not match:
+                continue
+            date_str = match.group(1).strip()
+
+            for fmt in iso_formats:
+                try:
+                    expires_at = datetime.strptime(date_str, fmt)
+                    days_left = (expires_at - datetime.utcnow()).days
+                    return {
+                        "valid": True,
+                        "expires_at": expires_at.strftime("%Y-%m-%d"),
+                        "days_left": days_left
+                    }
+                except ValueError:
+                    continue
 
         raise ValueError("Could not parse expiration date.")
 
