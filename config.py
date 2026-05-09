@@ -3,9 +3,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _parse_allowed_user_ids(raw: str | None) -> list[int]:
+    if not raw or not raw.strip():
+        return []
+    ids: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        ids.append(int(part))
+    return ids
+
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-ALLOWED_USER_IDS = list(map(int, os.getenv("ALLOWED_USER_IDS", "").split(",")))
+ALLOWED_USER_IDS = _parse_allowed_user_ids(os.getenv("ALLOWED_USER_IDS"))
 
 DB_USER = os.getenv("POSTGRES_USER")
 DB_PASSWORD = os.getenv("POSTGRES_PASSWORD")
