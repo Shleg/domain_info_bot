@@ -1,5 +1,7 @@
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
+from typing import Union
+
+from aiogram.types import Message, BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -12,8 +14,18 @@ from db.db import init_db
 from db.models import Domain
 from db.models import UserSettings
 from db.db import SessionLocal
-from bot.utils import is_valid_domain, check_http_https, check_ssl, check_domain_expiry
-from bot.scheduler import scheduler, check_http_https_domains, check_ssl_whois_domains
+from bot.utils import is_valid_domain
+from bot.scheduler import (
+    scheduler,
+    check_http_https_domains,
+    check_ssl_whois_domains,
+    set_bot,
+)
+from services.monitoring import (
+    resolve_effective_settings,
+    run_full_check,
+    format_check_report_message,
+)
 
 from config import ALLOWED_USER_IDS
 
@@ -168,9 +180,6 @@ async def list_domains_handler(message: Message):
 
 
 
-from typing import Union
-from aiogram.types import Message, CallbackQuery
-
 async def perform_check(source: Union[Message, CallbackQuery], domain: str) -> None:
     if isinstance(source, CallbackQuery):
         user_id = source.from_user.id
@@ -182,11 +191,10 @@ async def perform_check(source: Union[Message, CallbackQuery], domain: str) -> N
     await message.answer(f"🔍 Checking <b>{domain}</b>...")
 
     async with SessionLocal() as session:
-        # Try to find domain in DB
         result = await session.execute(
             select(Domain).where(
                 Domain.name == domain,
-                Domain.user_id == user_id
+                Domain.user_id == user_id,
             )
         )
         domain_row = result.scalar_one_or_none()
@@ -196,58 +204,9 @@ async def perform_check(source: Union[Message, CallbackQuery], domain: str) -> N
             session.add(settings)
             await session.commit()
 
-        # If domain is not in DB, use default settings for one-time check
-        if domain_row is None:
-            # Use global settings if available, else hardcoded defaults
-            track_http = getattr(settings, 'track_http', True)
-            track_https = getattr(settings, 'track_https', True)
-            track_ssl = getattr(settings, 'track_ssl', True)
-            track_whois = getattr(settings, 'track_whois', True)
-            ssl_warn_days = getattr(settings, 'ssl_warn_days', 14)
-            whois_warn_days = getattr(settings, 'whois_warn_days', 30)
-        else:
-            track_http = domain_row.track_http if domain_row.track_http is not None else settings.track_http
-            track_https = domain_row.track_https if domain_row.track_https is not None else settings.track_https
-            track_ssl = domain_row.track_ssl if domain_row.track_ssl is not None else settings.track_ssl
-            track_whois = domain_row.track_whois if domain_row.track_whois is not None else settings.track_whois
-            ssl_warn_days = domain_row.ssl_warn_days or settings.ssl_warn_days
-            whois_warn_days = domain_row.whois_warn_days or settings.whois_warn_days
-
-    reply = f"📊 Check results for <b>{domain}</b>:\n"
-
-    if track_http or track_https:
-        results = await check_http_https(domain)
-        for proto in ["http", "https"]:
-            if (proto == "http" and track_http) or (proto == "https" and track_https):
-                res = results.get(proto)
-                if res["status"] == "ok":
-                    reply += f"• <b>{proto.upper()}</b>: ✅ {res['code']}\n"
-                else:
-                    reply += f"• <b>{proto.upper()}</b>: ❌ {res['error']}\n"
-
-    if track_ssl:
-        ssl_result = await check_ssl(domain)
-        reply += "\n🔐 <b>SSL Certificate:</b>\n"
-        if ssl_result["valid"]:
-            reply += (
-                f"• Issuer: {ssl_result['issuer']}\n"
-                f"• Valid until: {ssl_result['expires_at']}\n"
-                f"• Days left: {ssl_result['days_left']}\n"
-            )
-        else:
-            reply += f"• ❌ SSL check error: {ssl_result['error']}\n"
-
-    if track_whois:
-        whois_result = await check_domain_expiry(domain)
-        reply += "\n🌐 <b>Domain Registration:</b>\n"
-        if whois_result["valid"]:
-            reply += (
-                f"• Expires on: {whois_result['expires_at']}\n"
-                f"• Days left: {whois_result['days_left']}\n"
-            )
-        else:
-            reply += f"• ❌ WHOIS error: {whois_result['error']}\n"
-
+    effective = resolve_effective_settings(domain_row, settings)
+    report = await run_full_check(domain, effective)
+    reply = format_check_report_message(domain, report, effective)
     await message.answer(reply)
 
 
@@ -274,8 +233,6 @@ async def check_domain_handler(message: Message):
 
 
 # Handler for inline check button callbacks
-from aiogram.types import CallbackQuery
-
 @dp.callback_query(F.data.startswith("check:"))
 async def handle_check_callback(callback: CallbackQuery):
     """
@@ -510,6 +467,7 @@ async def main():
         BotCommand(command="help", description="Help with commands"),
     ])
     await init_db()
+    set_bot(bot)
     # scheduler.add_job(check_all_domains, "interval", minutes=10)
     scheduler.add_job(check_http_https_domains, "interval", minutes=10)
     scheduler.add_job(check_ssl_whois_domains, "cron", hour=4, minute=0)
