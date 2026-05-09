@@ -21,4 +21,5 @@ async def copy_crypto_handler(callback: CallbackQuery) -> None:
         await callback.message.answer(
             "<code>TUGi5pzSnM6kqpXMHkXiPL6yFyGmC9vAje</code>"
         )
+        await callback.message.answer("Network: <b>Tron (TRC20)</b>")
     await callback.answer()
