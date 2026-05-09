@@ -4,40 +4,20 @@ and Telegram message formatting for check results.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from db.models import Domain, UserSettings
+from schemas.monitoring import CheckReport, EffectiveMonitoringSettings
 from bot.utils import check_http_https, check_ssl, check_domain_expiry
 
 
-@dataclass(frozen=True)
-class EffectiveMonitoringSettings:
-    track_http: bool
-    track_https: bool
-    track_ssl: bool
-    track_whois: bool
-    ssl_warn_days: int
-    whois_warn_days: int
-
-
-@dataclass
-class CheckReport:
-    """Raw probe results returned by ``run_full_check``."""
-
-    http_https: dict[str, dict[str, Any]] | None
-    ssl: dict[str, Any] | None
-    whois: dict[str, Any] | None
-
-
 def resolve_effective_settings(
-    domain_row: Domain | Any | None,
+    domain_row: Domain | None,
     user_settings: UserSettings | None,
 ) -> EffectiveMonitoringSettings:
     """
     Merge per-domain overrides with global user defaults.
-    ``domain_row`` may be ``None`` (ad-hoc check) or any object with Domain-like columns
-    (e.g. a SQLAlchemy ``Row`` from ``domains``).
+    ``domain_row`` is ``None`` for ad-hoc checks outside the monitoring list.
     """
     us = user_settings
     if domain_row is None:
@@ -70,9 +50,7 @@ def resolve_effective_settings(
         if domain_row.track_whois is not None
         else bool(us.track_whois if us else True)
     )
-    ssl_warn_days = domain_row.ssl_warn_days or (
-        int(us.ssl_warn_days) if us else 15
-    )
+    ssl_warn_days = domain_row.ssl_warn_days or (int(us.ssl_warn_days) if us else 15)
     whois_warn_days = domain_row.whois_warn_days or (
         int(us.whois_warn_days) if us else 30
     )
@@ -133,12 +111,17 @@ def should_alert_expiry(
         if not ssl_result["valid"] or ssl_result.get("days_left", 0) < settings.ssl_warn_days:
             out.append("SSL certificate is expiring or invalid ⚠️")
     if settings.track_whois and whois_result is not None:
-        if not whois_result["valid"] or whois_result.get("days_left", 0) < settings.whois_warn_days:
+        if (
+            not whois_result["valid"]
+            or whois_result.get("days_left", 0) < settings.whois_warn_days
+        ):
             out.append("Domain registration is expiring ⚠️")
     return out
 
 
-def format_check_report_message(domain: str, report: CheckReport, settings: EffectiveMonitoringSettings) -> str:
+def format_check_report_message(
+    domain: str, report: CheckReport, settings: EffectiveMonitoringSettings
+) -> str:
     """Format a manual /check reply (HTML snippets for Aiogram ParseMode.HTML)."""
     reply = f"📊 Check results for <b>{domain}</b>:\n"
 

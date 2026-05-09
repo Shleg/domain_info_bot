@@ -7,13 +7,16 @@ from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 import asyncio
 
-from sqlalchemy import select
-
 from config import BOT_TOKEN
 from db.db import init_db
-from db.models import Domain
-from db.models import UserSettings
 from db.db import SessionLocal
+from db.repositories import (
+    create_monitoring_domain,
+    ensure_user_settings,
+    get_domain,
+    list_domains_for_user,
+    remove_monitoring_domain,
+)
 from bot.utils import is_valid_domain
 from bot.scheduler import (
     scheduler,
@@ -123,27 +126,13 @@ async def add_domain_handler(message: Message):
         return
 
     async with SessionLocal() as session:
-        # Check if the domain is already monitored by this user
-        existing = await session.execute(
-            Domain.__table__.select().where(
-                Domain.name == domain,
-                Domain.user_id == message.from_user.id
-            )
-        )
-        result = existing.fetchone()
-
-        if result:
+        if not await create_monitoring_domain(
+            session,
+            user_id=message.from_user.id,
+            name=domain,
+        ):
             await message.answer("ℹ️ This domain is already being monitored.")
             return
-
-        # Create a new domain object
-        new_domain = Domain(
-            name=domain,
-            user_id=message.from_user.id
-        )
-
-        session.add(new_domain)
-        await session.commit()
 
         await message.answer(f"✅ Domain <b>{domain}</b> has been added for monitoring.")
 
@@ -162,18 +151,15 @@ async def list_domains_handler(message: Message):
             await message.answer("⛔️ You do not have access to this command.")
             return
 
-        result = await session.execute(
-            Domain.__table__.select().where(Domain.user_id == message.from_user.id)
-        )
-        domains = result.fetchall()
+        domains = await list_domains_for_user(session, message.from_user.id)
 
         if not domains:
             await message.answer("🔍 There are no domains in the database yet.")
             return
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=row.name, callback_data=f"check:{row.name}")]
-            for row in domains
+            [InlineKeyboardButton(text=d.name, callback_data=f"check:{d.name}")]
+            for d in domains
         ])
 
         await message.answer("📝 Select a domain to check:", reply_markup=keyboard)
@@ -191,18 +177,8 @@ async def perform_check(source: Union[Message, CallbackQuery], domain: str) -> N
     await message.answer(f"🔍 Checking <b>{domain}</b>...")
 
     async with SessionLocal() as session:
-        result = await session.execute(
-            select(Domain).where(
-                Domain.name == domain,
-                Domain.user_id == user_id,
-            )
-        )
-        domain_row = result.scalar_one_or_none()
-        settings = await session.get(UserSettings, user_id)
-        if settings is None:
-            settings = UserSettings(user_id=user_id)
-            session.add(settings)
-            await session.commit()
+        domain_row = await get_domain(session, user_id=user_id, name=domain)
+        settings = await ensure_user_settings(session, user_id)
 
     effective = resolve_effective_settings(domain_row, settings)
     report = await run_full_check(domain, effective)
@@ -269,24 +245,13 @@ async def remove_domain_handler(message: Message):
     domain = parts[1].strip().lower()
 
     async with SessionLocal() as session:
-        result = await session.execute(
-            Domain.__table__.select().where(
-                Domain.name == domain,
-                Domain.user_id == message.from_user.id
-            )
-        )
-
-        if not result.fetchone():
+        if not await remove_monitoring_domain(
+            session,
+            user_id=message.from_user.id,
+            name=domain,
+        ):
             await message.answer("ℹ️ This domain was not found in your list.")
             return
-
-        await session.execute(
-            Domain.__table__.delete().where(
-                Domain.name == domain,
-                Domain.user_id == message.from_user.id
-            )
-        )
-        await session.commit()
 
         await message.answer(f"🗑️ Domain <b>{domain}</b> has been removed from monitoring.")
 
@@ -342,57 +307,49 @@ async def cmd_settings(message: Message):
         # Domain-specific settings
         if len(parts) == 2:
             domain_name = parts[1].strip().lower()
-            domain_result = await session.execute(
-                Domain.__table__.select().where(
-                    Domain.name == domain_name,
-                    Domain.user_id == message.from_user.id
-                )
+            domain_obj = await get_domain(
+                session, user_id=message.from_user.id, name=domain_name
             )
-            domain = domain_result.fetchone()
-            if not domain:
+            if domain_obj is None:
                 await message.answer("⚠️ This domain is not in your monitoring list.")
                 return
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text=f"HTTP {'✅' if domain.track_http else '❌'}",
+                        text=f"HTTP {'✅' if domain_obj.track_http else '❌'}",
                         callback_data=f"toggle:domain:{domain_name}:track_http"
                     ),
                     InlineKeyboardButton(
-                        text=f"HTTPS {'✅' if domain.track_https else '❌'}",
+                        text=f"HTTPS {'✅' if domain_obj.track_https else '❌'}",
                         callback_data=f"toggle:domain:{domain_name}:track_https"
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        text=f"SSL {'✅' if domain.track_ssl else '❌'}",
+                        text=f"SSL {'✅' if domain_obj.track_ssl else '❌'}",
                         callback_data=f"toggle:domain:{domain_name}:track_ssl"
                     ),
                     InlineKeyboardButton(
-                        text=f"WHOIS {'✅' if domain.track_whois else '❌'}",
+                        text=f"WHOIS {'✅' if domain_obj.track_whois else '❌'}",
                         callback_data=f"toggle:domain:{domain_name}:track_whois"
                     )
                 ]
             ])
 
             reply = f"⚙️ <b>Settings for domain:</b> <code>{domain_name}</code>\n"
-            reply += f"• HTTP: {'✅' if domain.track_http else '❌'}\n"
-            reply += f"• HTTPS: {'✅' if domain.track_https else '❌'}\n"
-            reply += f"• SSL: {'✅' if domain.track_ssl else '❌'}\n"
-            reply += f"• WHOIS: {'✅' if domain.track_whois else '❌'}\n"
-            reply += f"• SSL Warn: {domain.ssl_warn_days or '—'} days\n"
-            reply += f"• WHOIS Warn: {domain.whois_warn_days or '—'} days\n"
+            reply += f"• HTTP: {'✅' if domain_obj.track_http else '❌'}\n"
+            reply += f"• HTTPS: {'✅' if domain_obj.track_https else '❌'}\n"
+            reply += f"• SSL: {'✅' if domain_obj.track_ssl else '❌'}\n"
+            reply += f"• WHOIS: {'✅' if domain_obj.track_whois else '❌'}\n"
+            reply += f"• SSL Warn: {domain_obj.ssl_warn_days or '—'} days\n"
+            reply += f"• WHOIS Warn: {domain_obj.whois_warn_days or '—'} days\n"
 
             await message.answer(reply, reply_markup=keyboard)
             return
 
         # Global settings
-        settings = await session.get(UserSettings, message.from_user.id)
-        if not settings:
-            settings = UserSettings(user_id=message.from_user.id)
-            session.add(settings)
-            await session.commit()
+        settings = await ensure_user_settings(session, message.from_user.id)
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [

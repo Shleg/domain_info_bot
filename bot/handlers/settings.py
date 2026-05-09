@@ -2,10 +2,16 @@
 
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
+
 from db.db import SessionLocal
-from db.models import Domain, UserSettings
+from db.models import UserSettings
+from db.repositories import get_domain
 
 settings_router = Router()
+
+TOGGLE_FIELDS = frozenset(
+    {"track_http", "track_https", "track_ssl", "track_whois"}
+)
 
 
 @settings_router.callback_query(F.data.startswith("toggle:"))
@@ -18,14 +24,29 @@ async def toggle_setting_handler(callback: CallbackQuery):
         toggle:domain:example.com:track_http
     """
     parts = callback.data.split(":")
-    if len(parts) not in (3, 4):
+    scope = parts[1]
+
+    if scope == "global":
+        if len(parts) != 3:
+            await callback.answer("Invalid toggle request")
+            return
+        setting_name = parts[2]
+    elif scope == "domain":
+        if len(parts) != 4:
+            await callback.answer("Invalid toggle request")
+            return
+        domain_name = parts[2]
+        setting_name = parts[3]
+    else:
         await callback.answer("Invalid toggle request")
         return
 
-    scope = parts[1]
+    if setting_name not in TOGGLE_FIELDS:
+        await callback.answer("Invalid toggle request")
+        return
+
     async with SessionLocal() as session:
         if scope == "global":
-            setting_name = parts[2]
             settings = await session.get(UserSettings, callback.from_user.id)
             if not settings:
                 settings = UserSettings(user_id=callback.from_user.id)
@@ -34,32 +55,29 @@ async def toggle_setting_handler(callback: CallbackQuery):
             current = getattr(settings, setting_name)
             setattr(settings, setting_name, not current)
             await session.commit()
-            await callback.answer(f"{setting_name} set to {'ON' if not current else 'OFF'}")
-            await callback.message.delete()
-            await callback.message.bot.send_message(callback.from_user.id, "/settings")
-
-        elif scope == "domain":
-            domain_name = parts[2]
-            setting_name = parts[3]
-            domain_result = await session.execute(
-                Domain.__table__.select().where(
-                    Domain.name == domain_name,
-                    Domain.user_id == callback.from_user.id
-                )
+            await callback.answer(
+                f"{setting_name} set to {'ON' if not current else 'OFF'}"
             )
-            domain = domain_result.fetchone()
-            if not domain:
+            await callback.message.delete()
+            await callback.message.bot.send_message(
+                callback.from_user.id, "/settings"
+            )
+
+        else:
+            domain_obj = await get_domain(
+                session, user_id=callback.from_user.id, name=domain_name
+            )
+            if domain_obj is None:
                 await callback.answer("Domain not found")
                 return
 
-            current = getattr(domain, setting_name)
-            setattr(domain, setting_name, not current)
-            await session.execute(
-                Domain.__table__.update()
-                .where(Domain.id == domain.id)
-                .values({setting_name: not current})
-            )
+            current = getattr(domain_obj, setting_name)
+            setattr(domain_obj, setting_name, not current)
             await session.commit()
-            await callback.answer(f"{domain_name} {setting_name} set to {'ON' if not current else 'OFF'}")
+            await callback.answer(
+                f"{domain_name} {setting_name} set to {'ON' if not current else 'OFF'}"
+            )
             await callback.message.delete()
-            await callback.message.bot.send_message(callback.from_user.id, f"/settings {domain_name}")
+            await callback.message.bot.send_message(
+                callback.from_user.id, f"/settings {domain_name}"
+            )

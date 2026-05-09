@@ -4,6 +4,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+DEBUG = _env_truthy("DEBUG")
+
+
 def _parse_allowed_user_ids(raw: str | None) -> list[int]:
     if not raw or not raw.strip():
         return []

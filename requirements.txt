@@ -20,6 +20,7 @@ typing-inspection==0.4.0
 typing_extensions==4.13.2
 yarl==1.19.0
 SQLAlchemy[asyncio]
+alembic>=1.13.0
 asyncpg
 httpx
 python-whois
