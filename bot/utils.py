@@ -146,50 +146,6 @@ def _check_ssl_sync(domain: str) -> Dict[str, Any]:
 async def check_ssl(domain: str) -> Dict[str, Any]:
     return await asyncio.to_thread(_check_ssl_sync, domain)
 
-# def check_domain_expiry(domain: str) -> Dict[str, Any]:
-#     """
-#     Checks the domain registration expiration date via WHOIS.
-#
-#     Args:
-#         domain (str): The domain name.
-#
-#     Returns:
-#         dict: Expiry info or error:
-#               {
-#                   "valid": True,
-#                   "expires_at": "2025-08-19",
-#                   "days_left": 103
-#               }
-#               or
-#               {
-#                   "valid": False,
-#                   "error": "..."
-#               }
-#     """
-#     try:
-#         w = whois.whois(domain)
-#         expires_at = w.expiration_date
-#
-#         if isinstance(expires_at, list):
-#             expires_at = next((d for d in expires_at if isinstance(d, datetime)), None)
-#
-#         if not isinstance(expires_at, datetime):
-#             raise ValueError("Could not determine expiration date.")
-#
-#         days_left = (expires_at - datetime.utcnow()).days
-#
-#         return {
-#             "valid": True,
-#             "expires_at": expires_at.strftime("%Y-%m-%d"),
-#             "days_left": days_left
-#         }
-#
-#     except Exception as e:
-#         return {
-#             "valid": False,
-#             "error": str(e)
-#         }
-
 
 def _check_domain_expiry_sync(domain: str) -> Dict[str, Any]:
     """
