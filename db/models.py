@@ -23,6 +23,14 @@ class Domain(AsyncAttrs, Base):
         track_whois (bool | None): Whether to check domain expiration via WHOIS.
         ssl_warn_days (int | None): Days before SSL expiry to warn.
         whois_warn_days (int | None): Days before domain expiry to warn.
+        last_avail_check_at: Last HTTP/HTTPS probe time (UTC).
+        last_avail_ok: Whether the last probe had no availability issues.
+        last_avail_alert_signature: Fingerprint of the last sent availability alert (dedup).
+        last_avail_alert_at: When the last availability alert was sent.
+        last_expiry_check_at: Last SSL/WHOIS probe time (UTC).
+        last_expiry_ok: Whether the last probe had no expiry issues.
+        last_expiry_alert_signature: Fingerprint of the last sent expiry alert (dedup).
+        last_expiry_alert_at: When the last expiry alert was sent.
     """
     __tablename__ = "domains"
     __table_args__ = (
@@ -39,6 +47,16 @@ class Domain(AsyncAttrs, Base):
     track_whois: bool = Column(Boolean, nullable=True)
     ssl_warn_days: int = Column(Integer, nullable=True)
     whois_warn_days: int = Column(Integer, nullable=True)
+
+    last_avail_check_at: datetime.datetime | None = Column(DateTime, nullable=True)
+    last_avail_ok: bool | None = Column(Boolean, nullable=True)
+    last_avail_alert_signature: str | None = Column(String(1024), nullable=True)
+    last_avail_alert_at: datetime.datetime | None = Column(DateTime, nullable=True)
+
+    last_expiry_check_at: datetime.datetime | None = Column(DateTime, nullable=True)
+    last_expiry_ok: bool | None = Column(Boolean, nullable=True)
+    last_expiry_alert_signature: str | None = Column(String(1024), nullable=True)
+    last_expiry_alert_at: datetime.datetime | None = Column(DateTime, nullable=True)
 
     def __repr__(self) -> str:
         return f"Domain(id={self.id}, name='{self.name}', user_id={self.user_id})"

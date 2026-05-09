@@ -7,7 +7,7 @@ from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 import asyncio
 
-from config import BOT_TOKEN
+from config import BOT_TOKEN, CHECK_INTERVAL_MIN, SSL_CRON_HOUR, SSL_CRON_MINUTE
 from db.db import init_db
 from db.db import SessionLocal
 from db.repositories import (
@@ -426,8 +426,17 @@ async def main():
     await init_db()
     set_bot(bot)
     # scheduler.add_job(check_all_domains, "interval", minutes=10)
-    scheduler.add_job(check_http_https_domains, "interval", minutes=10)
-    scheduler.add_job(check_ssl_whois_domains, "cron", hour=4, minute=0)
+    scheduler.add_job(
+        check_http_https_domains,
+        "interval",
+        minutes=CHECK_INTERVAL_MIN,
+    )
+    scheduler.add_job(
+        check_ssl_whois_domains,
+        "cron",
+        hour=SSL_CRON_HOUR,
+        minute=SSL_CRON_MINUTE,
+    )
     scheduler.start()
     dp.include_router(settings_router)
     await dp.start_polling(bot)

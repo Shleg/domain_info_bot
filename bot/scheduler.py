@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+from datetime import datetime
 from typing import Any
 
 from aiogram import Bot
@@ -46,6 +47,89 @@ def get_bot() -> Bot:
     return _bot_instance
 
 
+def _alert_signature(lines: list[str]) -> str:
+    return "|".join(lines)
+
+
+async def _finalize_availability_alert(
+    *,
+    domain_id: int,
+    user_id: int,
+    domain_name: str,
+    problems: list[str],
+) -> None:
+    """Persist probe state; notify only when the issue set changed from the last alert."""
+    sig = _alert_signature(problems) if problems else ""
+    duplicate = False
+
+    async with SessionLocal() as db:
+        row = await db.get(Domain, domain_id)
+        if row is None:
+            return
+        row.last_avail_check_at = datetime.utcnow()
+        row.last_avail_ok = not bool(problems)
+        duplicate = bool(problems) and row.last_avail_alert_signature == sig
+        if not problems:
+            row.last_avail_alert_signature = None
+            row.last_avail_alert_at = None
+        await db.commit()
+
+    if not problems or duplicate:
+        return
+
+    text = (
+        f"🚨 Availability issues for domain <b>{domain_name}</b>:\n"
+        + "\n".join(f"• {p}" for p in problems)
+    )
+    await get_bot().send_message(user_id, text)
+
+    async with SessionLocal() as db:
+        row = await db.get(Domain, domain_id)
+        if row:
+            row.last_avail_alert_signature = sig
+            row.last_avail_alert_at = datetime.utcnow()
+            await db.commit()
+
+
+async def _finalize_expiry_alert(
+    *,
+    domain_id: int,
+    user_id: int,
+    domain_name: str,
+    problems: list[str],
+) -> None:
+    sig = _alert_signature(problems) if problems else ""
+    duplicate = False
+
+    async with SessionLocal() as db:
+        row = await db.get(Domain, domain_id)
+        if row is None:
+            return
+        row.last_expiry_check_at = datetime.utcnow()
+        row.last_expiry_ok = not bool(problems)
+        duplicate = bool(problems) and row.last_expiry_alert_signature == sig
+        if not problems:
+            row.last_expiry_alert_signature = None
+            row.last_expiry_alert_at = None
+        await db.commit()
+
+    if not problems or duplicate:
+        return
+
+    text = (
+        f"🚨 Expiry issues for domain <b>{domain_name}</b>:\n"
+        + "\n".join(f"• {p}" for p in problems)
+    )
+    await get_bot().send_message(user_id, text)
+
+    async with SessionLocal() as db:
+        row = await db.get(Domain, domain_id)
+        if row:
+            row.last_expiry_alert_signature = sig
+            row.last_expiry_alert_at = datetime.utcnow()
+            await db.commit()
+
+
 async def check_http_https_domains() -> None:
     semaphore = asyncio.Semaphore(5)
     async with SessionLocal() as session:
@@ -63,6 +147,7 @@ async def check_http_https_domains() -> None:
 
         await asyncio.sleep(random.uniform(1, 2))  # jitter delay
         async with semaphore:
+            problems: list[str] = []
             try:
                 http_result = (
                     await check_http_https(domain.name)
@@ -70,47 +155,49 @@ async def check_http_https_domains() -> None:
                     else None
                 )
                 problems = should_alert_availability(http_result, effective)
-                if problems:
-                    text = (
-                        f"🚨 Availability issues for domain <b>{domain.name}</b>:\n"
-                        + "\n".join(f"• {p}" for p in problems)
-                    )
-                    await get_bot().send_message(domain.user_id, text)
             except Exception as e:
-                await get_bot().send_message(
-                    domain.user_id,
-                    f"❌ Error checking HTTP/HTTPS for {domain.name}: {str(e)}",
-                )
+                problems = [
+                    f"❌ Error checking HTTP/HTTPS for {domain.name}: {str(e)}"
+                ]
+
+            await _finalize_availability_alert(
+                domain_id=domain.id,
+                user_id=domain.user_id,
+                domain_name=domain.name,
+                problems=problems,
+            )
 
     await asyncio.gather(*(check_one(row) for row in rows))
 
 
 async def check_ssl_whois_domains() -> None:
-    bot = get_bot()
     async with SessionLocal() as session:
         domains = await list_all_domains(session)
+        for d in domains:
+            session.expunge(d)
 
-        for domain in domains:  # type: Any
+    for domain in domains:  # type: Any
+        async with SessionLocal() as session:
             user_settings = await session.get(UserSettings, domain.user_id)
-            effective = resolve_effective_settings(domain, user_settings)
+        effective = resolve_effective_settings(domain, user_settings)
 
-            try:
-                ssl_result = await check_ssl(domain.name) if effective.track_ssl else None
-                whois_result = (
-                    await check_domain_expiry(domain.name)
-                    if effective.track_whois
-                    else None
-                )
-                problems = should_alert_expiry(ssl_result, whois_result, effective)
+        problems: list[str] = []
+        try:
+            ssl_result = await check_ssl(domain.name) if effective.track_ssl else None
+            whois_result = (
+                await check_domain_expiry(domain.name)
+                if effective.track_whois
+                else None
+            )
+            problems = should_alert_expiry(ssl_result, whois_result, effective)
+        except Exception as e:
+            problems = [
+                f"❌ Error checking SSL/WHOIS for {domain.name}: {str(e)}"
+            ]
 
-                if problems:
-                    text = (
-                        f"🚨 Expiry issues for domain <b>{domain.name}</b>:\n"
-                        + "\n".join(f"• {p}" for p in problems)
-                    )
-                    await bot.send_message(domain.user_id, text)
-            except Exception as e:
-                await bot.send_message(
-                    domain.user_id,
-                    f"❌ Error checking SSL/WHOIS for {domain.name}: {str(e)}",
-                )
+        await _finalize_expiry_alert(
+            domain_id=domain.id,
+            user_id=domain.user_id,
+            domain_name=domain.name,
+            problems=problems,
+        )
