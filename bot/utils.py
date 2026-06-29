@@ -8,12 +8,19 @@ Includes:
 """
 import subprocess
 import re
+import time
 import httpx
 import ssl
 import socket
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Tuple
 import asyncio
+
+WHOIS_CMD_TIMEOUT = 45
+WHOIS_PYTHON_TIMEOUT = 45
+WHOIS_REFERRAL_ATTEMPTS = 3
+WHOIS_REFERRAL_RETRY_DELAY = 5
 
 
 def is_valid_domain(domain: str) -> bool:
@@ -80,7 +87,7 @@ async def check_http_https(domain: str) -> Dict[str, Dict[str, Any]]:
             )
             stdout, stderr = await proc.communicate()
             code = stdout.decode().strip()
-            if code.isdigit() and int(code) < 600:
+            if code.isdigit() and 100 <= int(code) <= 599:
                 return {"ok": True, "code": int(code)}
             else:
                 return {"ok": False, "error": f"curl status: {code}, stderr: {stderr.decode().strip()}"}
@@ -147,62 +154,176 @@ async def check_ssl(domain: str) -> Dict[str, Any]:
     return await asyncio.to_thread(_check_ssl_sync, domain)
 
 
+_WHOIS_DATE_PATTERNS = (
+    r"Registry Expiry Date:\s*(.+)",
+    r"Registrar Registration Expiration Date:\s*(.+)",
+    r"paid-till:\s*(.+)",
+    r"Expiry Date:\s*(.+)",
+    r"Expiration Date:\s*(.+)",
+)
+
+_WHOIS_DATE_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S.%fZ",
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%d",
+    "%d-%b-%Y",
+    "%Y.%m.%d",
+)
+
+
+def _expiry_result(expires_at: datetime) -> Dict[str, Any]:
+    if expires_at.tzinfo is not None:
+        expires_at = expires_at.replace(tzinfo=None)
+    days_left = (expires_at - datetime.utcnow()).days
+    return {
+        "valid": True,
+        "expires_at": expires_at.strftime("%Y-%m-%d"),
+        "days_left": days_left,
+    }
+
+
+def _parse_whois_text(output: str) -> Optional[Dict[str, Any]]:
+    for pattern in _WHOIS_DATE_PATTERNS:
+        match = re.search(pattern, output, re.IGNORECASE)
+        if not match:
+            continue
+        date_str = match.group(1).strip()
+        for fmt in _WHOIS_DATE_FORMATS:
+            try:
+                return _expiry_result(datetime.strptime(date_str, fmt))
+            except ValueError:
+                continue
+    return None
+
+
+def _run_whois(domain: str, server: Optional[str] = None) -> subprocess.CompletedProcess[str]:
+    cmd = ["whois"]
+    if server:
+        cmd.extend(["-h", server])
+    cmd.append(domain)
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=WHOIS_CMD_TIMEOUT,
+    )
+
+
+def _extract_whois_server(output: str) -> Optional[str]:
+    for prefix in ("refer:", "whois:"):
+        for line in output.splitlines():
+            stripped = line.strip()
+            if stripped.lower().startswith(prefix):
+                return stripped.split(":", 1)[1].strip()
+    return None
+
+
+def _whois_via_command(domain: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    try:
+        result = _run_whois(domain)
+        if result.returncode != 0:
+            return None, "WHOIS command failed"
+
+        parsed = _parse_whois_text(result.stdout)
+        if parsed is not None:
+            return parsed, None
+
+        server = _extract_whois_server(result.stdout)
+        if server:
+            last_error = "Could not parse expiration date"
+            for attempt in range(WHOIS_REFERRAL_ATTEMPTS):
+                if attempt:
+                    time.sleep(WHOIS_REFERRAL_RETRY_DELAY)
+                referral = _run_whois(domain, server)
+                if referral.returncode != 0:
+                    last_error = "referral WHOIS command failed"
+                    continue
+                if not referral.stdout.strip():
+                    last_error = "referral returned empty response"
+                    continue
+                parsed = _parse_whois_text(referral.stdout)
+                if parsed is not None:
+                    return parsed, None
+                last_error = "Could not parse expiration date from referral"
+            return None, last_error
+
+        return None, "Could not parse expiration date"
+    except subprocess.TimeoutExpired:
+        return None, f"timed out after {WHOIS_CMD_TIMEOUT} seconds"
+    except Exception as e:
+        return None, str(e)
+
+
+def _expiration_from_python_record(record: Any) -> Optional[Dict[str, Any]]:
+    expiration = (
+        record.get("expiration_date")
+        if isinstance(record, dict)
+        else getattr(record, "expiration_date", None)
+    )
+    if expiration is not None:
+        if isinstance(expiration, list):
+            expiration = max(expiration)
+        if isinstance(expiration, datetime):
+            return _expiry_result(expiration)
+
+    raw = record.get("raw") if isinstance(record, dict) else None
+    if raw:
+        if isinstance(raw, list):
+            raw = "\n".join(str(part) for part in raw)
+        return _parse_whois_text(str(raw))
+    return None
+
+
+def _whois_via_python(domain: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    import whois as python_whois
+
+    strategies: tuple[tuple[str, dict[str, Any]], ...] = (
+        ("builtin", {"timeout": WHOIS_PYTHON_TIMEOUT, "inc_raw": True}),
+        ("command", {"timeout": WHOIS_PYTHON_TIMEOUT, "inc_raw": True, "command": True}),
+    )
+    errors: list[str] = []
+    for label, kwargs in strategies:
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(python_whois.whois, domain, **kwargs)
+                record = future.result(timeout=WHOIS_PYTHON_TIMEOUT + 5)
+        except FuturesTimeoutError:
+            errors.append(f"{label}: timed out after {WHOIS_PYTHON_TIMEOUT} seconds")
+            continue
+        except Exception as e:
+            errors.append(f"{label}: {e}")
+            continue
+
+        parsed = _expiration_from_python_record(record)
+        if parsed is not None:
+            return parsed, None
+        errors.append(f"{label}: no expiration date")
+
+    return None, "; ".join(errors) if errors else "lookup failed"
+
+
 def _check_domain_expiry_sync(domain: str) -> Dict[str, Any]:
     """
-    Checks domain expiry using the system `whois` command for better TLD support.
+    Checks domain expiry via system ``whois`` and python-whois, returning the
+    first successful parse (system whois is preferred when both succeed).
     """
-    try:
-        result = subprocess.run(["whois", domain], capture_output=True, text=True, timeout=10)
+    cmd_result, cmd_error = _whois_via_command(domain)
+    if cmd_result is not None:
+        return cmd_result
 
-        if result.returncode != 0:
-            raise RuntimeError("WHOIS command failed")
+    py_result, py_error = _whois_via_python(domain)
+    if py_result is not None:
+        return py_result
 
-        output = result.stdout
-
-        # More specific lines first — generic "Expiry Date:" matches inside
-        # "Registry Expiry Date:" and would capture ISO strings with fractional
-        # seconds (e.g. ...59.000Z) that plain %S%Z formats do not parse.
-        patterns = [
-            r"Registry Expiry Date:\s*(.+)",
-            r"Registrar Registration Expiration Date:\s*(.+)",
-            r"paid-till:\s*(.+)",
-            r"Expiry Date:\s*(.+)",
-            r"Expiration Date:\s*(.+)",
-        ]
-
-        iso_formats = (
-            "%Y-%m-%dT%H:%M:%S.%fZ",
-            "%Y-%m-%dT%H:%M:%SZ",
-            "%Y-%m-%d",
-            "%d-%b-%Y",
-            "%Y.%m.%d",
-        )
-
-        for pattern in patterns:
-            match = re.search(pattern, output, re.IGNORECASE)
-            if not match:
-                continue
-            date_str = match.group(1).strip()
-
-            for fmt in iso_formats:
-                try:
-                    expires_at = datetime.strptime(date_str, fmt)
-                    days_left = (expires_at - datetime.utcnow()).days
-                    return {
-                        "valid": True,
-                        "expires_at": expires_at.strftime("%Y-%m-%d"),
-                        "days_left": days_left
-                    }
-                except ValueError:
-                    continue
-
-        raise ValueError("Could not parse expiration date.")
-
-    except Exception as e:
-        return {
-            "valid": False,
-            "error": f"WHOIS error: {str(e)}"
-        }
+    errors: list[str] = []
+    if cmd_error:
+        errors.append(f"whois: {cmd_error}")
+    if py_error:
+        errors.append(f"python-whois: {py_error}")
+    return {
+        "valid": False,
+        "error": "; ".join(errors) or "all methods failed",
+    }
 
 
 async def check_domain_expiry(domain: str) -> Dict[str, Any]:
