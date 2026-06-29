@@ -4,6 +4,7 @@ services:
   db:
     image: postgres:15
     container_name: uptime_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -11,11 +12,11 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
 
-
   bot:
     build:
       context: .
     command: python -m bot.main
+    restart: unless-stopped
     env_file: .env
     depends_on:
       - db
